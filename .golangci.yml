@@ -1,0 +1,63 @@
+# golangci-lint standard config
+# Usage: golangci-lint run ./...
+# Version: 2 (required by golangci-lint >= v2)
+version: 2
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+output:
+  format: colored-line-number
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    check-shadow: true
+  gocyclo:
+    min-complexity: 15
+  dupl:
+    threshold: 200
+  misspell:
+    locale: US
+  lll:
+    line-length: 120
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+
+linters:
+  enable:
+    - errcheck       # unchecked errors
+    - govet          # suspicious constructs
+    - ineffassign    # ineffectual assignments
+    - staticcheck    # go static analysis (includes gosimple)
+    - unused         # unused const/func/type
+    - misspell       # typo detection
+    - unconvert      # unnecessary type conversions
+    - unparam        # unused function parameters
+  disable:
+    - gocyclo        # complexity threshold already set
+    - dupl           # code duplication
+    - funlen         # function length is subjective
+    - gocognit       # complexity metric is subjective
+    - wsl            # whitespace linter is too noisy
+    - godox          # TODO comments are intentional
+    - nestif         # nested if is sometimes necessary
+    - bodyclose      # false positives with http.HandlerFunc
+    - rowserrcheck   # not using database/sql
+    - sqlclosecheck  # not using database/sql
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    # Allow fmt.Errorf with %w for error wrapping
+    - linters:
+        - errcheck
+      text: "fmt.Errorf"
+  max-issues-per-linter: 0
+  max-same-issues: 0
