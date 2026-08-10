@@ -31,5 +31,5 @@ go.work.sum
 .trae/
 
 # AI相关
-.codegraph
-.rtk
+.codegraph/
+.rtk/
