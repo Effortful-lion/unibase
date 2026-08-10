@@ -1,8 +1,6 @@
 // Package types 提供了 llmkit 的核心类型定义。
 package types
 
-import "encoding/json"
-
 // Role 是消息角色。
 type Role string
 
@@ -46,20 +44,25 @@ type ContentBlock struct {
 
 // ToolCall 表示助手发起的工具调用。
 type ToolCall struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON 格式的调用参数
 }
 
 // Message 表示对话中的一条消息。
+//
+// 序列化约定：如果 Parts 非空，优先使用 Parts 作为富内容；
+// 否则使用 Content 作为纯文本内容。
+// User/System/Tool 消息通常只使用 Content。
+// Assistant 消息使用 Parts 携带富内容（文本、思考、工具调用等）。
 type Message struct {
 	Role             Role
-	Content          string
-	Parts            []ContentBlock
-	ToolCallID       string
-	ToolName         string
-	ReasoningContent string
-	Extra            map[string]any
+	Content          string         // 纯文本内容（User/System/Tool 消息使用）
+	Parts            []ContentBlock // 富内容块（Assistant 消息使用，非空时优先）
+	ToolCallID       string         // 工具调用回溯 ID（Tool 消息使用）
+	ToolName         string         // 工具名称（Tool 消息使用）
+	ReasoningContent string         // 推理内容（部分模型支持）
+	Extra            map[string]any // 扩展字段
 }
 
 // NewSystemMessage 创建 system 消息。
