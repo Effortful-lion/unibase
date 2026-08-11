@@ -39,6 +39,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -90,12 +91,15 @@ type Config struct {
 // ────────────────── RAG 引擎 ──────────────────
 
 // RAG 是检索增强生成引擎。
+//
+// 线程安全：所有公开方法均通过 mu 保护内部状态，可并发调用。
 type RAG struct {
 	config    Config
 	documents map[string]Document
 	chunks    []Chunk
 	idf       map[string]float64 // 逆文档频率
 	stopWords map[string]bool
+	mu        sync.RWMutex
 }
 
 // New 创建 RAG 引擎。
@@ -131,6 +135,9 @@ func (r *RAG) AddDocument(id, content string) {
 
 // AddDocumentWithMeta 添加带元数据的文档。
 func (r *RAG) AddDocumentWithMeta(id, content string, metadata map[string]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	doc := Document{
 		ID:       id,
 		Content:  content,
@@ -146,6 +153,9 @@ func (r *RAG) AddDocumentWithMeta(id, content string, metadata map[string]string
 
 // RemoveDocument 从知识库移除文档。
 func (r *RAG) RemoveDocument(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	delete(r.documents, id)
 	r.reindex()
 }
@@ -161,11 +171,15 @@ func (r *RAG) reindex() {
 
 // DocumentCount 返回知识库中文档数量。
 func (r *RAG) DocumentCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return len(r.documents)
 }
 
 // ChunkCount 返回知识库中块数量。
 func (r *RAG) ChunkCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return len(r.chunks)
 }
 
@@ -340,6 +354,9 @@ func cosineSimilarity(a, b map[string]float64) float64 {
 
 // Retrieve 检索与查询最相关的块。
 func (r *RAG) Retrieve(ctx context.Context, query string) ([]RetrievalResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if len(r.chunks) == 0 {
 		return nil, fmt.Errorf("rag: no documents indexed")
 	}
@@ -410,10 +427,16 @@ func (r *RAG) BuildContext(results []RetrievalResult) string {
 
 // ────────────────── 分词 ──────────────────
 
+// wordPattern 匹配单词/词条（字母数字序列）。
+var wordPattern = regexp.MustCompile(`[\w]+`)
+
+// sentencePattern 匹配中英文句子结束标点。
+var sentencePattern = regexp.MustCompile(`[。！？!?\.]`)
+
 // tokenize 将文本分词为小写词条。
 func tokenize(text string) []string {
 	text = strings.ToLower(text)
-	words := regexp.MustCompile(`[\w]+`).FindAllString(text, -1)
+	words := wordPattern.FindAllString(text, -1)
 	if words == nil {
 		return nil
 	}
@@ -439,7 +462,7 @@ func isAlphaNumeric(s string) bool {
 // splitSentences 按句号、问号、叹号分割文本。
 func splitSentences(text string) []string {
 	// 简单实现：按标点分割
-	sentences := regexp.MustCompile(`[。！？!?\.]`).Split(text, -1)
+	sentences := sentencePattern.Split(text, -1)
 	result := make([]string, 0, len(sentences))
 	for _, s := range sentences {
 		s = strings.TrimSpace(s)

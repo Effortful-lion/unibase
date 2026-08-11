@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -58,7 +59,7 @@ func (c *Config) Watch(opts WatchOptions) error {
 	}
 
 	var lastWrite time.Time
-	var pending bool
+	var pending atomic.Bool
 
 	for {
 		select {
@@ -81,24 +82,17 @@ func (c *Config) Watch(opts WatchOptions) error {
 			}
 
 			now := time.Now()
-			if !pending && now.Sub(lastWrite) < opts.Interval {
+			if !pending.Load() && now.Sub(lastWrite) < opts.Interval {
 				continue
 			}
 
 			lastWrite = now
-			pending = true
+			pending.Store(true)
 
 			go func() {
 				time.Sleep(opts.Debounce)
-				pending = false
-
-				c.mu.RLock()
-				c.v.WatchConfig()
-				c.mu.RUnlock()
-				// 执行变化回调
-				if c.onChange != nil {
-					c.runOnChange()
-				}
+				pending.Store(false)
+				c.runOnChange()
 			}()
 
 		case _, ok := <-watcher.Errors:

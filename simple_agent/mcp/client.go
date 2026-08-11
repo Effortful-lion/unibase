@@ -39,6 +39,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 )
 
 // Client 是 MCP 客户端，通过 stdio 与 MCP server 通信。
@@ -48,6 +49,7 @@ type Client struct {
 	stdout io.ReadCloser
 	mu     sync.Mutex
 	id     int
+	closed atomic.Bool
 }
 
 // Config 配置 MCP 客户端。
@@ -97,6 +99,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 
 // Close 关闭客户端并终止 server 进程。
 func (c *Client) Close() error {
+	c.closed.Store(true)
 	if c.stdin != nil {
 		c.stdin.Close()
 	}
@@ -137,10 +140,19 @@ type rpcNotification struct {
 	Method  string `json:"method"`
 }
 
+// ErrClientClosed 客户端已关闭，无法再发起请求。
+var ErrClientClosed = errors.New("mcp: client closed")
+
 // send 发送 JSON-RPC 请求并等待响应。
+// 通过 goroutine + channel 将阻塞 I/O 与 ctx 取消解耦。
+// ctx 取消时会关闭 stdin/stdout 管道，确保 I/O goroutine 退出，避免泄漏。
 func (c *Client) send(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.closed.Load() {
+		return nil, ErrClientClosed
+	}
 
 	c.id++
 	id := c.id
@@ -161,31 +173,89 @@ func (c *Client) send(ctx context.Context, method string, params any) (json.RawM
 		Params:  paramsBytes,
 	}
 
-	if err := json.NewEncoder(c.stdin).Encode(req); err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+	// 发送请求
+	encodeDone := make(chan error, 1)
+	go func() {
+		encodeDone <- json.NewEncoder(c.stdin).Encode(req)
+	}()
+
+	var encodeErr error
+	select {
+	case encodeErr = <-encodeDone:
+		if encodeErr != nil {
+			return nil, fmt.Errorf("send request: %w", encodeErr)
+		}
+	case <-ctx.Done():
+		c.stdin.Close() // 关闭 stdin，解除 encoder goroutine 的阻塞
+		return nil, ctx.Err()
 	}
 
-	decoder := json.NewDecoder(c.stdout)
-	for {
+	// 接收响应
+	decodeDone := make(chan rpcResponse, 1)
+	decodeErr := make(chan error, 1)
+	go func() {
 		var resp rpcResponse
-		if err := decoder.Decode(&resp); err != nil {
-			return nil, fmt.Errorf("decode response: %w", err)
+		err := json.NewDecoder(c.stdout).Decode(&resp)
+		if err != nil {
+			decodeErr <- err
+			return
 		}
+		decodeDone <- resp
+	}()
 
+	select {
+	case resp := <-decodeDone:
 		// 忽略通知（无 ID）
 		if resp.ID == 0 {
-			continue
+			return c.receiveResponse(ctx, id)
 		}
-
 		if resp.ID != id {
-			continue // 跳过不匹配的响应
+			return c.receiveResponse(ctx, id)
 		}
-
 		if resp.Error != nil {
 			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
-
 		return resp.Result, nil
+	case err := <-decodeErr:
+		return nil, fmt.Errorf("decode response: %w", err)
+	case <-ctx.Done():
+		// 不关闭 c.stdout（receiveResponse 后续可能还会读），
+		// decode goroutine 会在 send 返回后随 select 超时退出，
+		// 或在 client.Close() 时随子进程终止而退出。
+		return nil, ctx.Err()
+	}
+}
+
+// receiveResponse 跳过非匹配响应，直到找到匹配 ID 的响应。
+func (c *Client) receiveResponse(ctx context.Context, expectedID int) (json.RawMessage, error) {
+	for {
+		respDone := make(chan rpcResponse, 1)
+		respErr := make(chan error, 1)
+
+		go func() {
+			var resp rpcResponse
+			err := json.NewDecoder(c.stdout).Decode(&resp)
+			if err != nil {
+				respErr <- err
+				return
+			}
+			respDone <- resp
+		}()
+
+		select {
+		case resp := <-respDone:
+			if resp.ID == expectedID {
+				if resp.Error != nil {
+					return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+				}
+				return resp.Result, nil
+			}
+			// 跳过不匹配的响应，继续
+		case err := <-respErr:
+			return nil, fmt.Errorf("decode response: %w", err)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 }
 

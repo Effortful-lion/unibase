@@ -17,6 +17,8 @@
 package memory
 
 import (
+	"sync"
+
 	"github.com/Effortful-lion/unibase/llmkit/types"
 )
 
@@ -48,7 +50,10 @@ type SlidingWindowConfig struct {
 // 不适用场景：
 //   - 需要长期记忆（使用其他 Memory 实现）
 //   - 需要智能摘要（使用 SummarizedMemory）
+//
+// 线程安全：所有方法均通过 mu 保护内部状态，可并发调用。
 type SlidingWindow struct {
+	mu          sync.Mutex
 	maxMessages int
 	messages    []types.Message
 }
@@ -68,18 +73,24 @@ func NewSlidingWindow(maxMessages int) *SlidingWindow {
 
 // Inject 注入新消息。
 func (s *SlidingWindow) Inject(messages []types.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.messages = append(s.messages, messages...)
 	s.trim()
 }
 
 // Add 注入单条消息（便捷方法）。
 func (s *SlidingWindow) Add(msg types.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.messages = append(s.messages, msg)
 	s.trim()
 }
 
 // Retrieve 返回当前记忆中的所有消息。
 func (s *SlidingWindow) Retrieve() []types.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	result := make([]types.Message, len(s.messages))
 	copy(result, s.messages)
 	return result
@@ -87,6 +98,8 @@ func (s *SlidingWindow) Retrieve() []types.Message {
 
 // Clear 清空记忆。
 func (s *SlidingWindow) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.messages = s.messages[:0]
 }
 
@@ -101,6 +114,8 @@ func (s *SlidingWindow) trim() {
 
 // Len 返回当前消息数。
 func (s *SlidingWindow) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return len(s.messages)
 }
 

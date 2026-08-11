@@ -37,6 +37,7 @@ package simple_agent
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Effortful-lion/unibase/llmkit/provider"
 	"github.com/Effortful-lion/unibase/llmkit/schema"
@@ -55,10 +56,14 @@ type Config struct {
 }
 
 // Agent 对话型 Agent，管理 LLM ↔ 工具的自动循环。
+//
+// 线程安全：所有公开方法（Run/Continue/Reset/Messages/SaveSession）均通过 mu 保护 messages。
+// 注意：Run 返回的 Stream 事件通道由 goroutine 写入，消费该通道的代码需注意通道关闭后不再读取。
 type Agent struct {
 	cfg      Config
 	toolMap  map[string]Tool
 	messages []types.Message
+	mu       sync.RWMutex
 }
 
 const defaultMaxSteps = 10
@@ -97,10 +102,12 @@ func (a *Agent) Run(ctx context.Context, userInput string) Stream {
 	out := make(chan Event, 8)
 
 	if userInput != "" {
+		a.mu.Lock()
 		a.messages = append(a.messages, types.Message{
 			Role:    types.RoleUser,
 			Content: userInput,
 		})
+		a.mu.Unlock()
 	}
 
 	go func() {
@@ -117,16 +124,20 @@ func (a *Agent) Run(ctx context.Context, userInput string) Stream {
 // 不追加新的空 user 消息，直接让 LLM 基于当前历史继续生成。
 func (a *Agent) Continue(ctx context.Context, extraContext string) Stream {
 	if extraContext != "" {
+		a.mu.Lock()
 		a.messages = append(a.messages, types.Message{
 			Role:    types.RoleUser,
 			Content: extraContext,
 		})
+		a.mu.Unlock()
 	}
 	return a.Run(ctx, "")
 }
 
 // Reset 清空对话历史，保留 system prompt，开始新对话。
 func (a *Agent) Reset() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.messages = nil
 	if a.cfg.SystemPrompt != "" {
 		a.messages = append(a.messages, types.Message{
@@ -138,6 +149,8 @@ func (a *Agent) Reset() {
 
 // Messages 返回当前对话历史快照（只读）。
 func (a *Agent) Messages() []types.Message {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	cp := make([]types.Message, len(a.messages))
 	copy(cp, a.messages)
 	return cp
@@ -189,8 +202,14 @@ func (a *Agent) runLoop(ctx context.Context, out chan<- Event) {
 			return
 		}
 
+		// 拷贝当前对话历史（快照），避免在 LLM 流式消费期间持锁
+		a.mu.RLock()
+		msgs := make([]types.Message, len(a.messages))
+		copy(msgs, a.messages)
+		a.mu.RUnlock()
+
 		// 调用 LLM 流式接口
-		stream, err := model.ChatStream(ctx, a.messages, a.buildChatOptions())
+		stream, err := model.ChatStream(ctx, msgs, a.buildChatOptions())
 		if err != nil {
 			out <- Event{Type: EventError, Step: step, Err: err}
 			return
@@ -248,13 +267,17 @@ func (a *Agent) runLoop(ctx context.Context, out chan<- Event) {
 
 		// 无工具调用 → 对话结束
 		if len(toolCallsOrdered) == 0 {
+			a.mu.Lock()
 			a.messages = append(a.messages, assistantMsg)
+			a.mu.Unlock()
 			out <- Event{Type: EventDone, Step: step}
 			return
 		}
 
 		// 有工具调用 → 执行并注入结果
+		a.mu.Lock()
 		a.messages = append(a.messages, assistantMsg)
+		a.mu.Unlock()
 
 		for _, tc := range toolCallsOrdered {
 			out <- Event{Type: EventToolCall, Step: step, ToolCall: tc}
@@ -273,12 +296,14 @@ func (a *Agent) runLoop(ctx context.Context, out chan<- Event) {
 
 			out <- Event{Type: EventToolResult, Step: step, ToolResult: result}
 
+			a.mu.Lock()
 			a.messages = append(a.messages, types.Message{
 				Role:       types.RoleTool,
 				Content:    result,
 				ToolCallID: tc.ID,
 				ToolName:   tc.Name,
 			})
+			a.mu.Unlock()
 		}
 	}
 
@@ -413,11 +438,16 @@ func runSync(ctx context.Context, ag *Agent, prompt string) (string, []ToolResul
 		case EventTextDelta:
 			finalText += evt.Text
 		case EventToolCall:
+			// 只记录工具调用信息，结果在 EventToolResult 中到达
 			toolResults = append(toolResults, ToolResult{
 				Name:      evt.ToolCall.Name,
 				Arguments: evt.ToolCall.Arguments,
-				Result:    evt.ToolResult,
 			})
+		case EventToolResult:
+			// 将结果写回最后一个 ToolResult（与 EventToolCall 按顺序配对）
+			if len(toolResults) > 0 {
+				toolResults[len(toolResults)-1].Result = evt.ToolResult
+			}
 		case EventDone:
 			// 完成
 		case EventError:
