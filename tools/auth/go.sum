@@ -1,0 +1,5 @@
+github.com/Effortful-lion/unibase/tools/crypto v0.0.0-20260811204407-5d82c26ced18 h1:dcpjLH3yjWjMwBJUkb/hIHuW5oKrWl1hIS+iaCXLqFI=
+github.com/Effortful-lion/unibase/tools/crypto v0.0.0-20260811204407-5d82c26ced18/go.mod h1:UbRMQV89PXlcZ0jgk0wD56nAk5SZ7geAfrkr9YytX6Y=
+github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
+golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
+golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
