@@ -78,7 +78,7 @@ func (b *Builder) Query(k, v string) *Builder {
 }
 
 // JSON 设置请求体为 JSON（Content-Type 自动设为 application/json）。
-func (b *Builder) JSON(v interface{}) *Builder {
+func (b *Builder) JSON(v any) *Builder {
 	if b.buildErr != nil {
 		return b
 	}

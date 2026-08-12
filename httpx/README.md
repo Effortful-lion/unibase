@@ -11,7 +11,7 @@ Gin 框架增强工具库。封装常见能力、增强原生能力、不强绑�
 ## 安装
 
 ```bash
-go get github.com/yourname/httpx
+go get github.com/Effortful-lion/httpx
 ```
 
 ## 快速开始
@@ -23,9 +23,9 @@ import (
     "time"
 
     "github.com/gin-gonic/gin"
-    "github.com/yourname/httpx"
-    "github.com/yourname/httpx/params"
-    "github.com/yourname/httpx/middleware"
+    "github.com/Effortful-lion/httpx"
+    "github.com/Effortful-lion/httpx/params"
+    "github.com/Effortful-lion/httpx/middleware"
 )
 
 func main() {
@@ -157,14 +157,39 @@ func handler(c *gin.Context) {
 
 ```go
 func init() {
-    params.RegisterValidator("mobile", func(fl validator.FieldLevel) bool {
-        return regexp.MatchString(`^1[3-9]\d{9}$`, fl.Field().String())
+    params.RegisterRule("mobile", func(fl validator.FieldLevel) bool {
+        return regexp.MustCompile(`^1[3-9]\d{9}$`).MatchString(fl.Field().String())
     })
 }
 
 // 使用
 type CreateUserReq struct {
     Mobile string `json:"mobile" validate:"required,mobile"`
+}
+```
+
+**Fluent 规则构造器**
+
+不依赖 struct tag，直接在代码中构造校验规则：
+
+```go
+func handler(c *gin.Context) {
+    var req CreateUserReq
+    params.MustBindWith(c, &req, binding.JSON,
+        params.Rule("Name").Required().Min(1).Max(100),
+        params.Rule("Email").Required().Email(),
+    )
+}
+```
+
+`Rule.Custom` 引用已注册的 tag，打通两套用法：
+
+```go
+func handler(c *gin.Context) {
+    var req CreateUserReq
+    params.MustBindWith(c, &req, binding.JSON,
+        params.Rule("Mobile").Required().Custom("mobile"),
+    )
 }
 ```
 
@@ -326,7 +351,7 @@ func handler(c *gin.Context) {
 | 子包 | 说明 | Gin 依赖 |
 |------|------|----------|
 | `httpx` | 根包：`Gin(c)` / `JWT(secret)` / `NewHMACParser` / `NewClaims` | 是 |
-| `httpx/params` | 参数增强：`QueryInt` / `MustBindJSON` / `RegisterValidator` | 是 |
+| `httpx/params` | 参数增强：`QueryInt` / `MustBindJSON` / `RegisterRule` | 是 |
 | `httpx/response` | 响应增强：Stream / SSE / HTML / File | 是 |
 | `httpx/jwt` | JWT：Parser / Claims / 中间件 / ClaimsFromContext | 否 |
 | `httpx/sse` | SSE：Event / Writer | 否 |

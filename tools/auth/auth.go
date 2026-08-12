@@ -8,9 +8,11 @@ package auth
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Effortful-lion/unibase/tools/auth/basic"
 	"github.com/Effortful-lion/unibase/tools/auth/jwt"
+	gjwt "github.com/golang-jwt/jwt/v5"
 )
 
 // Auth 统一认证接口，上层无需关心内部采用哪种认证方式。
@@ -52,7 +54,16 @@ func NewDefaultAuth(jwtSecret string, authenticator basic.Authenticator) *Defaul
 }
 
 func (a *DefaultAuth) GenerateToken(userID, username, role string) (string, error) {
-	return a.jwtManager.Generate(userID, username, role)
+	claims := jwt.Claims{
+		UserID:   userID,
+		Username: username,
+		Role:     role,
+		RegisteredClaims: gjwt.RegisteredClaims{
+			IssuedAt:  gjwt.NewNumericDate(time.Now()),
+			ExpiresAt: gjwt.NewNumericDate(time.Now().Add(jwt.DefaultExpiry)),
+		},
+	}
+	return a.jwtManager.GenerateWithClaims(claims)
 }
 
 func (a *DefaultAuth) ValidateToken(token string) (*jwt.Claims, error) {

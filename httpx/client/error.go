@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // ClientError 包装 HTTP 客户端调用过程中的错误。
@@ -26,6 +27,11 @@ func (e *ClientError) Unwrap() error {
 
 func (e *ClientError) StatusCode() int { return e.statusCode }
 func (e *ClientError) Body() []byte    { return e.body }
+
+// Code 返回 HTTP 状态码对应的业务码（格式：1 + 3位状态码）。
+func (e *ClientError) Code() string {
+	return fmt.Sprintf("1%03d", e.statusCode)
+}
 
 // IsTimeout 判断是否为超时错误。
 func IsTimeout(err error) bool {

@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Effortful-lion/httpx/response"
+	"github.com/Effortful-lion/unibase/tools/limiter"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/time/rate"
 )
 
 // RateLimiter 基于令牌桶的限流器。
@@ -14,24 +15,24 @@ import (
 type RateLimiter struct {
 	limiters map[string]*limiterEntry
 	mu       sync.Mutex
-	rate     rate.Limit
+	rate     float64
 	burst    int
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 }
 
 type limiterEntry struct {
-	limiter    *rate.Limiter
+	limiter    *limiter.Limiter
 	lastAccess time.Time
 }
 
 // NewRateLimiter 创建限流器。
 // rate: 每秒产生的令牌数
 // burst: 桶容量（允许的突发请求数）
-func NewRateLimiter(r rate.Limit, burst int) *RateLimiter {
+func NewRateLimiter(rate float64, burst int) *RateLimiter {
 	rl := &RateLimiter{
 		limiters: make(map[string]*limiterEntry),
-		rate:     r,
+		rate:     rate,
 		burst:    burst,
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
@@ -74,7 +75,7 @@ func (rl *RateLimiter) cleanupLoop() {
 }
 
 // getLimiter 按 key 获取限流器，不存在则创建。
-func (rl *RateLimiter) getLimiter(key string) *rate.Limiter {
+func (rl *RateLimiter) getLimiter(key string) *limiter.Limiter {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -83,9 +84,9 @@ func (rl *RateLimiter) getLimiter(key string) *rate.Limiter {
 		return entry.limiter
 	}
 
-	limiter := rate.NewLimiter(rl.rate, rl.burst)
-	rl.limiters[key] = &limiterEntry{limiter: limiter, lastAccess: time.Now()}
-	return limiter
+	l := limiter.NewLimiter(rl.rate, rl.burst)
+	rl.limiters[key] = &limiterEntry{limiter: l, lastAccess: time.Now()}
+	return l
 }
 
 // RateLimitOption 限流中间件配置。
@@ -122,9 +123,7 @@ func RateLimit(limiter *RateLimiter, opts ...RateLimitOption) gin.HandlerFunc {
 		key := cfg.keyFunc(c)
 		if !limiter.getLimiter(key).Allow() {
 			c.Header("Retry-After", "1")
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "rate limit exceeded",
-			})
+			response.ResponseFail(c, http.StatusTooManyRequests, "10429", "rate limit exceeded")
 			return
 		}
 		c.Next()

@@ -72,6 +72,7 @@ type redisCmd interface {
 	Expire(ctx context.Context, key string, expiration time.Duration) *redisBoolCmd
 	Del(ctx context.Context, keys ...string) *redisIntCmd
 	Pipeline() *redisPipeliner
+	TxPipeline() *redisPipeliner
 	Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error)
 }
 
@@ -84,6 +85,7 @@ type redisCmdAdapter struct {
 		Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
 		Del(ctx context.Context, keys ...interface{}) *redis.IntCmd
 		Pipeline() redis.Pipeliner
+		TxPipeline() redis.Pipeliner
 		Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error)
 	}
 }
@@ -120,6 +122,9 @@ func (a *redisCmdAdapter) Scan(ctx context.Context, cursor uint64, match string,
 }
 func (a *redisCmdAdapter) Pipeline() *redisPipeliner {
 	return &redisPipeliner{pipe: a.client.Pipeline()}
+}
+func (a *redisCmdAdapter) TxPipeline() *redisPipeliner {
+	return &redisPipeliner{pipe: a.client.TxPipeline()}
 }
 
 // RedisStorageOption 配置 RedisStorage 的行为。
@@ -369,22 +374,23 @@ func (r *RedisStorage) LoadAll(ctx context.Context) (map[string][]string, map[st
 }
 
 // SaveAll 先清空所有现有 key，再批量写入新数据。
+// 写入阶段使用 Redis 事务（MULTI/EXEC）保证原子性。
 func (r *RedisStorage) SaveAll(ctx context.Context, roleMembers map[string][]string, rolePerms map[string][]Permission) error {
 	// 先清除旧数据，再写入新数据
 	if err := r.clearAll(ctx); err != nil {
 		return fmt.Errorf("clear old data: %w", err)
 	}
 
-	if err := r.writeAll(ctx, roleMembers, rolePerms); err != nil {
+	if err := r.writeAllTx(ctx, roleMembers, rolePerms); err != nil {
 		return fmt.Errorf("write new data: %w", err)
 	}
 
 	return nil
 }
 
-// writeAll 将数据写入 Redis（不删除旧数据）。
-func (r *RedisStorage) writeAll(ctx context.Context, roleMembers map[string][]string, rolePerms map[string][]Permission) error {
-	pipe := r.client.Pipeline()
+// writeAllTx 使用 Redis 事务将数据写入 Redis（不删除旧数据）。
+func (r *RedisStorage) writeAllTx(ctx context.Context, roleMembers map[string][]string, rolePerms map[string][]Permission) error {
+	pipe := r.client.TxPipeline()
 
 	for subjectID, roles := range roleMembers {
 		key := r.keySubjectRoles(subjectID)
@@ -474,6 +480,7 @@ func RedisClientAdapter(client interface {
 	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
 	Del(ctx context.Context, keys ...interface{}) *redis.IntCmd
 	Pipeline() redis.Pipeliner
+	TxPipeline() redis.Pipeliner
 	Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error)
 }) redisCmd {
 	return &redisCmdAdapter{client: client}

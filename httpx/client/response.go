@@ -27,9 +27,12 @@ func (r *Response) Err() error {
 	}
 	if r.resp.StatusCode < 200 || r.resp.StatusCode >= 300 {
 		body, readErr := io.ReadAll(r.resp.Body)
-		r.resp.Body.Close()
 		if readErr != nil {
 			return newClientError(r.resp.StatusCode, nil, fmt.Errorf("%s: %w", http.StatusText(r.resp.StatusCode), readErr))
+		}
+		err := r.resp.Body.Close()
+		if err != nil {
+			return newClientError(r.resp.StatusCode, nil, fmt.Errorf("resp.body.close err: %w", err))
 		}
 		return newClientError(r.resp.StatusCode, body, errors.New(http.StatusText(r.resp.StatusCode)))
 	}
@@ -73,7 +76,7 @@ func (r *Response) Text() (string, error) {
 
 // JSON 将响应体反序列化到 v。
 // 非 2xx 状态码返回错误，不会反序列化错误响应体。
-func (r *Response) JSON(v interface{}) error {
+func (r *Response) JSON(v any) error {
 	if err := r.Err(); err != nil {
 		return err
 	}

@@ -2,17 +2,22 @@
 //
 // 快速开始：
 //
+//	// 日志中间件（可注入 logx logger）
+//	r.Use(middleware.Log(middleware.WithLogger(myLogger)))
+//
+//	// CORS 中间件
 //	r.Use(middleware.CORS(
 //	    middleware.WithAllowOrigins("http://localhost:3000"),
 //	    middleware.WithAllowCredentials(true),
 //	))
 //
-//	limiter := middleware.NewRateLimiter(rate.Limit(10), 100)
+//	// 限流中间件
+//	limiter := middleware.NewRateLimiter(10, 100)
 //	r.Use(middleware.RateLimit(limiter))
 //
-//	r.Use(middleware.Metrics())
-//	r.GET("/metrics", middleware.MetricsHandler())
+//	// JWT 中间件
+//	r.Use(middleware.JWT([]byte("secret")))
 //
-// 能力：CORS（Option 模式配置）、RateLimit（令牌桶 + 自动清理过期 limiter）、
-// Metrics（Prometheus 请求计数 + 延迟直方图）。
+// 能力：Log（可插拔 logger）、CORS（Option 模式配置）、
+// RateLimit（令牌桶 + 自动清理过期 limiter）、JWT（薄包装 jwt 包）。
 package middleware

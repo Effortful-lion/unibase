@@ -77,10 +77,6 @@ type Enforcer interface {
 	// ---- 权限检查 ----
 	IsAllowed(ctx context.Context, subjectID, resource, action string) (bool, error)
 	IsAllowedInDomain(ctx context.Context, subjectID, resource, action, domain string) (bool, error)
-
-	// ---- 批量操作 ----
-	Save(ctx context.Context) error
-	Load(ctx context.Context) error
 }
 
 // Effect 表示权限效果。

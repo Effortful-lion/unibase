@@ -294,45 +294,6 @@ func (e *enforcer) checkRolePermission(ctx context.Context, roleName, domain, re
 	return false, nil
 }
 
-// ---------- 批量操作 ----
-
-// Save 将当前权限策略持久化到存储。
-func (e *enforcer) Save(ctx context.Context) error {
-	bulk, ok := e.storage.(StorageBulk)
-	if !ok {
-		return ErrStorageRequired
-	}
-
-	roleMembers, rolePerms, err := e.collectAllPolicies(ctx)
-	if err != nil {
-		return err
-	}
-
-	return bulk.SaveAll(ctx, roleMembers, rolePerms)
-}
-
-// Load 从存储加载所有权限策略。
-func (e *enforcer) Load(ctx context.Context) error {
-	bulk, ok := e.storage.(StorageBulk)
-	if !ok {
-		return ErrStorageRequired
-	}
-	_, _, err := bulk.LoadAll(ctx)
-	return err
-}
-
-// collectAllPolicies 从存储中收集所有主体角色关系和角色权限关系。
-func (e *enforcer) collectAllPolicies(ctx context.Context) (map[string][]string, map[string][]Permission, error) {
-	// 注意：这里需要一个能枚举所有主体的方法。
-	// 内存存储可以直接遍历，Redis 存储需要额外的 Scan 操作。
-	// 目前通过 StorageBulk 接口由具体存储实现决定。
-	bulk, ok := e.storage.(StorageBulk)
-	if !ok {
-		return nil, nil, ErrStorageRequired
-	}
-	return bulk.LoadAll(ctx)
-}
-
 // ---------- 查询辅助 ----
 
 // ListRoles 返回所有已定义的全局角色名（去重）。

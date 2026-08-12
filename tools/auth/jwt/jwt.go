@@ -14,25 +14,46 @@ import (
 //
 // Role 字段为后续 RBAC 权限控制预留，生成 token 时传入，解析后可用于
 // Casbin 等权限框架的 Enforce(sub=role, obj=path, act=method) 调用。
+//
+// Extra 用于存放任意自定义字段，Set/Get 方法提供类型安全的读写。
 type Claims struct {
-	UserID   string `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role,omitempty"`
+	UserID   string         `json:"user_id"`
+	Username string         `json:"username"`
+	Role     string         `json:"role,omitempty"`
+	Extra    map[string]any `json:"extra,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// SetExtra 写入扩展字段。
+func (c *Claims) SetExtra(key string, value any) {
+	if c.Extra == nil {
+		c.Extra = make(map[string]any)
+	}
+	c.Extra[key] = value
+}
+
+// GetExtra 读取扩展字段，ok 为 false 表示字段不存在。
+func (c *Claims) GetExtra(key string) (value any, ok bool) {
+	if c.Extra == nil {
+		return nil, false
+	}
+	value, ok = c.Extra[key]
+	return
 }
 
 // Manager 定义了 JWT 的完整生命周期操作。
 type Manager interface {
-	// Generate 生成 JWT token，包含 userID、username 与 role。
-	// role 可为空字符串，为后续权限控制预留字段。
+	// Generate 为标准 Claims 生成 JWT token。
 	Generate(userID, username, role string) (string, error)
 
-	// Parse 解析并校验 JWT token，返回 claims。
-	// 若 token 过期或签名无效则返回错误。
+	// GenerateWithClaims 为任意实现 jwt.Claims 的类型生成 JWT token。
+	// 支持：Claims 结构体、jwt.MapClaims、自定义 struct（嵌入 jwt.RegisteredClaims）。
+	GenerateWithClaims(claims jwt.Claims) (string, error)
+
+	// Parse 解析并校验 JWT token，返回标准 Claims。
 	Parse(token string) (*Claims, error)
 
 	// Refresh 使用已有 token 的 claims 生成新 token，续期有效期。
-	// 适用于 token 续期场景，避免用户重新登录。
 	Refresh(token string) (string, error)
 }
 
@@ -50,6 +71,23 @@ type ManagerConfig struct {
 
 // DefaultExpiry 默认 token 有效期。
 const DefaultExpiry = 24 * time.Hour
+
+// NewClaims 创建标准 Claims（不含时间戳，由 Manager 填充）。
+func NewClaims(userID, username string) *Claims {
+	return &Claims{
+		UserID:   userID,
+		Username: username,
+	}
+}
+
+// NewClaimsWithRole 创建带角色的标准 Claims。
+func NewClaimsWithRole(userID, username, role string) *Claims {
+	return &Claims{
+		UserID:   userID,
+		Username: username,
+		Role:     role,
+	}
+}
 
 // NewManager 创建使用默认过期时间（24h）的 Manager。
 func NewManager(secret string) Manager {
@@ -79,7 +117,10 @@ func (m *manager) Generate(userID, username, role string) (string, error) {
 			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
+	return m.GenerateWithClaims(claims)
+}
 
+func (m *manager) GenerateWithClaims(claims jwt.Claims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(m.secret)
 }
@@ -107,8 +148,12 @@ func (m *manager) Refresh(tokenString string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 以当前时间重新签发，保留原有业务 claims
-	return m.Generate(claims.UserID, claims.Username, claims.Role)
+	// 以当前时间重新签发，保留原有业务 claims（包括 Extra）
+	now := time.Now()
+	claims.IssuedAt = jwt.NewNumericDate(now)
+	claims.ExpiresAt = jwt.NewNumericDate(now.Add(m.expiry))
+	claims.NotBefore = jwt.NewNumericDate(now)
+	return m.GenerateWithClaims(*claims)
 }
 
 // ErrUnexpectedSigningMethod 表示 token 使用的签名算法与预期不符。

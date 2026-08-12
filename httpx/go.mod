@@ -1,17 +1,22 @@
-module github.com/yourname/httpx
+module github.com/Effortful-lion/httpx
 
 go 1.26.5
 
 require (
+	github.com/Effortful-lion/unibase/logx v0.0.0-20260811204407-5d82c26ced18
 	github.com/Effortful-lion/unibase/tools/auth v0.0.0-20260811204407-5d82c26ced18
+	github.com/Effortful-lion/unibase/tools/limiter v0.0.0-20260811204407-5d82c26ced18
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/prometheus/client_golang v1.24.1
-	golang.org/x/time v0.15.0
 )
 
+replace github.com/Effortful-lion/unibase/logx => ../logx
+
 replace github.com/Effortful-lion/unibase/tools/auth => ../tools/auth
+
+replace github.com/Effortful-lion/unibase/tools/limiter => ../tools/limiter
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -47,5 +52,6 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
