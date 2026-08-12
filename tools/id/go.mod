@@ -8,4 +8,7 @@ require (
 	github.com/matoous/go-nanoid/v2 v2.1.0
 )
 
-require github.com/stretchr/testify v1.11.1 // indirect
+require (
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
+)

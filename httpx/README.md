@@ -358,6 +358,61 @@ func handler(c *gin.Context) {
 | `httpx/ranger` | Range 解析 / 断点续传 | 否 |
 | `httpx/client` | HTTP 客户端：Builder 模式 | 否 |
 | `httpx/middleware` | CORS / 限流 / Prometheus 指标 | 是 |
+| `httpx/swagger` | Swagger UI 挂载：`Setup(r, basePath, specURL)` | 是 |
+| `httpx/captcha` | 图形验证码：`Generate()` / `Verify(id, answer)` | 是 |
+
+## Swagger UI 集成
+
+一行代码挂载 Swagger UI：
+
+```go
+import _ "yourProject/docs" // swag init 生成的 docs 包
+import "github.com/Effortful-lion/httpx/swagger"
+
+func main() {
+    r := gin.Default()
+    swagger.Setup(r, "/api/v1", "/swagger/doc.json")
+    r.Run(":8080")
+}
+```
+
+访问 `http://localhost:8080/api/v1/swagger/index.html` 查看文档。
+
+前置条件：项目需使用 [swaggo/swag](https://github.com/swaggo/swag) 生成 docs：
+
+```bash
+swag init -g cmd/main.go -o docs
+```
+
+## 图形验证码
+
+```go
+import "github.com/Effortful-lion/httpx/captcha"
+
+// 生成验证码
+result := captcha.Generate()
+
+// 返回给前端
+c.JSON(200, gin.H{
+    "captcha_id": result.ID,
+    "captcha_img": "data:image/png;base64," + result.Image,
+})
+
+// 校验（验证码 ID 通过 Cookie 带回）
+if captcha.Verify(captchaID, userInput) {
+    // 校验通过
+}
+```
+
+支持自定义配置：
+
+```go
+result := captcha.Generate(
+    captcha.WithHeight(100),
+    captcha.WithWidth(300),
+    captcha.WithLength(4),
+)
+```
 
 ## 错误处理
 
