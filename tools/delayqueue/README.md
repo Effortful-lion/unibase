@@ -1,19 +1,32 @@
 # tools/delayqueue
 
-基于 Redis ZSet 的延迟队列，支持消息延迟投递和批量拉取。
+生产级 Redis 延迟队列，基于 Redis ZSet + Lua 原子脚本 + lockdog 分布式锁实现。
 
 ## 设计
 
 ```
-消息投递时间(纳秒) → ZSet Score
-消息内容           → ZSet Member (id|payload)
-
-Poll 时：
-  ZRANGEBYSCORE key 0 <now> → 获取到期消息
-  ZREM key member           → 确认后移除
+ZSet {key}            → 延迟队列（score = 投递时间戳，member = JSON 编码消息）
+ZSet {key}:processing → Processing 处理中队列（score = 拉取时间戳）
+List {key}:dlq        → 死信队列（处理超过重试上限的消息）
+Lock {key}:nack:{id}  → Nack 分布式锁（lockdog，防止 Nack/Sweep 竞态）
 ```
 
+## 核心能力
+
+| 能力 | 实现 |
+|------|------|
+| 原子 Poll | ZPOPMINBYSCORE 原子弹出，多消费者不重复抢 |
+| 原子 Nack | Lua 脚本 + lockdog 分布式锁，Nack/Sweep 并发安全 |
+| 可见性超时 | Poll 后消息进入 Processing，超时未 Ack 由 Sweeper 自动重试 |
+| NACK + 重试 | 消费失败按退避时间重新入队 |
+| 死信队列 (DLQ) | 超过 MaxRetries 的消息移入 DLQ，供人工排查 |
+| Sweeper | 后台定时扫描超时 Processing 消息，每条消息加锁处理 |
+| 优雅关闭 | Stop 等待 Processing 处理完毕 |
+| Consumer 模式 | Start(ctx, consumer) 一行启动，内置退避、重试、DLQ |
+
 ## 快速开始
+
+### Consumer 模式（推荐）
 
 ```go
 import (
@@ -25,47 +38,77 @@ import (
 )
 
 rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-q := delayqueue.New(rdb, "order:delay:queue")
+q := delayqueue.New(rdb, "order:delay",
+    delayqueue.WithMaxRetries(3),
+    delayqueue.WithVisibilityTimeout(30*time.Second),
+    delayqueue.WithBackoff(func(retries int) time.Duration {
+        return time.Duration(retries) * 2 * time.Minute
+    }),
+)
 
-// 投递消息（30 秒后可被取出）
-id, err := q.Add(context.Background(), "order-123", 30*time.Second)
-
-// 投递消息（指定绝对时间）
-id, err := q.AddAt(context.Background(), "order-456", time.Now().Add(5*time.Minute))
-
-// 消费循环
-for {
-    msgs, err := q.Poll(ctx, 10, time.Second) // 最多 10 条，阻塞 1s
-    for _, m := range msgs {
-        fmt.Println("处理:", m)
-        q.Ack(ctx, m)
-    }
+type orderHandler struct{}
+func (h *orderHandler) Consume(ctx context.Context, msg *delayqueue.Message) error {
+    fmt.Println("处理订单:", msg.Payload)
+    return nil // nil = Ack，非 nil = Nack
 }
+
+ctx := context.Background()
+q.Start(ctx, &orderHandler{})
 ```
 
-## API
+### 手动模式
 
-| 方法 | 说明 |
-|------|------|
-| `Add(ctx, msg, delay)` | 延迟 delay 后投递 msg，返回消息 ID |
-| `AddAt(ctx, msg, t)` | 在绝对时间 t 投递 msg |
-| `Poll(ctx, batch, timeout)` | 拉取最多 batch 条到期消息，timeout 为阻塞超时 |
-| `Ack(ctx, member)` | 确认消息已处理，从队列移除 |
-| `Len(ctx)` | 返回队列中未处理的消息数 |
-| `Remove(ctx)` | 清空队列（测试用） |
+```go
+// 投递
+id, err := q.Add(ctx, "order-123", 30*time.Minute)
 
-## 消息格式
+// 拉取
+msgs, err := q.Poll(ctx, 10)
+for _, raw := range msgs {
+    msg, _ := delayqueue.ParseMessage(raw)
 
-Poll 返回的 member 格式为 `id|payload`，其中：
-- `id`: 投递时生成的消息标识
-- `payload`: 原始消息内容
+    if err := process(msg); err != nil {
+        q.Nack(ctx, raw) // 失败 → 重试或 DLQ
+        continue
+    }
+    q.Ack(ctx, raw) // 成功 → 确认
+}
 
-## 注意事项
+// 停止
+q.Stop()
+```
 
-- Poll 与 Ack 不保证原子性，消费端应做幂等处理
-- 多副本部署时，多个消费者可能同时拉取到同一条消息（需配合分布式锁或业务去重）
-- Redis ZSet 的 score 使用 UnixNano（纳秒精度），时间范围足够
+## 重试策略
+
+默认退避：第 N 次重试延迟 N 分钟。可通过 `WithBackoff` 自定义。
+
+## 配置选项
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `WithMaxRetries(n)` | 3 | 最大重试次数 |
+| `WithVisibilityTimeout(d)` | 30s | Processing 超时时间 |
+| `WithSweepInterval(d)` | 5s | Sweeper 扫描间隔（自动不超过 VisibilityTimeout/3） |
+| `WithBackoff(fn)` | 第 N 次延迟 N 分钟 | 自定义重试退避函数 |
+
+## 生命周期
+
+```
+Add → ZSet (score=投递时间)
+  ↓ [score <= now, ZPOPMINBYSCORE 原子弹出]
+Poll → ZSet:processing (score=拉取时间)
+  ↓ [处理成功]
+Ack → ZRem from processing ✅ 完成
+  ↓ [处理失败]
+Nack (Lua原子 + lockdog锁) → ZRem + ZAdd (backoff后重新入队) 🔄 重试
+  ↓ [重试 >= MaxRetries]
+DLQ (List) 💀 死信
+  ↓ [Processing 超时未 Ack]
+Sweeper (每条消息 lockdog 锁保护) → 同 Nack 逻辑 ♻️ 自动回收
+```
 
 ## 依赖
 
 - `github.com/redis/go-redis/v9`
+- `github.com/Effortful-lion/unibase/component/lockdog`
+- `github.com/Effortful-lion/unibase/tools/id`
