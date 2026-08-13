@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Effortful-lion/unibase/mux"
-	"github.com/Effortful-lion/unibase/websocketx"
+	"github.com/Effortful-lion/unibase/mux/internal/websocketx"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -202,6 +202,67 @@ func TestEngine_WebSocket_UnknownCmd(t *testing.T) {
 	code, _ := resp.Meta["code"].(string)
 	if code != "10400" {
 		t.Errorf("expected 10400, got %q", code)
+	}
+}
+
+// ── WebSocket JWT Token 注入测试 ──────────────────────────────────
+
+func TestEngine_WebSocket_JWTTokenInjection(t *testing.T) {
+	engine := mux.New(mux.WithMaxWebSocketConn(100))
+
+	wsRouter := engine.WS()
+	wsRouter.Cmd("auth.check", func(ctx context.Context, session *websocketx.Session, msg *websocketx.CmdMessage) error {
+		token, ok := session.Meta()["jwt_token"].(string)
+		if !ok {
+			return session.Conn().Write(ctx, &websocketx.CmdMessage{
+				Cmd:  msg.Cmd,
+				Meta: map[string]interface{}{"code": "10500", "message": "jwt_token not found in meta"},
+			})
+		}
+		return session.Conn().Write(ctx, &websocketx.CmdMessage{
+			Cmd:  msg.Cmd,
+			Meta: map[string]interface{}{"code": "10200"},
+			Body: json.RawMessage(`{"token":"` + token + `"}`),
+		})
+	})
+
+	// 使用 token 连接
+	wsURL, cleanup := startRealServer(t, engine)
+	defer cleanup()
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL+"?token=test-jwt-123", nil)
+	if err != nil {
+		t.Fatalf("dial with token: %v", err)
+	}
+	defer ws.Close()
+
+	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	if err := ws.WriteJSON(websocketx.CmdMessage{
+		Cmd:  "auth.check",
+		Body: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var resp websocketx.CmdMessage
+	if err := ws.ReadJSON(&resp); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	code, _ := resp.Meta["code"].(string)
+	if code != "10200" {
+		t.Errorf("code: got %q, want 10200", code)
+	}
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Token != "test-jwt-123" {
+		t.Errorf("token: got %q, want test-jwt-123", body.Token)
 	}
 }
 
