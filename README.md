@@ -6,13 +6,13 @@ unibase 是一个渐进式扩展的个人开发基础底座，面向后端服务
 
 ```
 ├── logx/       # 结构化日志
-├── httpx/      # HTTP 客户端/服务端
+├── httpx/      # HTTP 客户端/服务端（Gin 增强）
 ├── rpcx/       # RPC 相关
 ├── adapter/    # 第三方服务客户端薄封装（redis、mysql、kafka、prometheus）
 ├── component/  # 通用组件（cache、gpool、poolx、state）
 ├── schedule/   # 定时任务触发（At / Every / After / Between / BetweenDaily）
 ├── plugins/    # 插件
-├── tools/      # 工具函数
+├── tools/      # 工具函数（auth、breaker、crypto、encodingx、email、hash、id、limiter、random）
 ├── llmkit/     # LLM 开发库
 ├── configx/    # 配置管理
 ├── docs/       # 文档
@@ -46,7 +46,6 @@ unibase 是一个渐进式扩展的个人开发基础底座，面向后端服务
 
 ## 通用不足
 
-- **无编解码工具**：TOML/JSON/YAML 文件反序列化需各项目自行实现
 - **无字符串工具**：截断、分割、模板替换等高频操作缺失
 - **无数据校验工具**：类似 `go-playground/validator` 的轻量封装缺失
 - **无单元测试基础设施**：无测试 fixture、mock 生成、覆盖率报告模板

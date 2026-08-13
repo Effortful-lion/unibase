@@ -6,8 +6,9 @@
 //	response/  — 统一响应结构 + ResponseWriter 接口
 //	params/    — 参数绑定 + 集成校验
 //	jwt/       — JWT 令牌生成、解析、Gin 中间件
-//	middleware/ — 常用 Gin 中间件（日志、CORS、限流、JWT）
+//	middleware/ — 常用 Gin 中间件（日志、CORS、限流、Panic 恢复）
 //	client/    — 出站 HTTP 请求 Builder
+//	server.go  — 服务启动 + 优雅关闭（SIGTERM/SIGINT）
 //
 // 设计原则：
 //   - 只有 middleware 层绑 Gin（返回 gin.HandlerFunc）
@@ -30,6 +31,7 @@
 //	r.Use(middleware.Log())
 //	r.Use(middleware.CORS())
 //	r.Use(middleware.JWT([]byte("secret")))
+//	r.Use(middleware.Panic())
 //
 //	// 出站请求
 //	res := client.Get().URL(url).Do(ctx)

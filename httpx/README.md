@@ -286,7 +286,47 @@ r.Use(middleware.Metrics(
 ))
 ```
 
-### 五、HTTP 客户端
+#### Panic 恢复
+
+```go
+r.Use(middleware.Panic())
+```
+
+捕获 handler 中的 panic，记录错误日志并返回 500 响应，避免进程崩溃。
+
+```go
+r.Use(middleware.Panic(middleware.WithPanicLogger(myLogger)))
+```
+
+### 五、服务启动与优雅关闭
+
+```go
+import "github.com/Effortful-lion/httpx"
+
+r := gin.Default()
+
+if err := httpx.RunWithShutdown(r, ":8080",
+    httpx.WithShutdownTimeout(15*time.Second),
+    httpx.WithShutdownHook(func(ctx context.Context) error {
+        return db.Close() // 关闭数据库连接
+    }),
+); err != nil {
+    log.Fatal(err)
+}
+```
+
+监听 SIGTERM / SIGINT 信号，优雅关闭流程：
+1. 执行 `WithShutdownHook` 钩子（串行）
+2. 停止接受新请求，等待活跃请求完成
+3. 超时则强制退出
+
+开发环境可直接使用 `httpx.Run`（无优雅关闭）：
+
+```go
+httpx.Run(r, ":8080")
+```
+
+### 六、HTTP 客户端
 
 和 Gin 无关的独立能力，Builder 链式调用：
 
@@ -350,14 +390,14 @@ func handler(c *gin.Context) {
 
 | 子包 | 说明 | Gin 依赖 |
 |------|------|----------|
-| `httpx` | 根包：`Gin(c)` / `JWT(secret)` / `NewHMACParser` / `NewClaims` | 是 |
+| `httpx` | 根包：`Gin(c)` / `JWT(secret)` / `NewHMACParser` / `NewClaims` / `RunWithShutdown` | 是 |
 | `httpx/params` | 参数增强：`QueryInt` / `MustBindJSON` / `RegisterRule` | 是 |
 | `httpx/response` | 响应增强：Stream / SSE / HTML / File | 是 |
 | `httpx/jwt` | JWT：Parser / Claims / 中间件 / ClaimsFromContext | 否 |
 | `httpx/sse` | SSE：Event / Writer | 否 |
 | `httpx/ranger` | Range 解析 / 断点续传 | 否 |
 | `httpx/client` | HTTP 客户端：Builder 模式 | 否 |
-| `httpx/middleware` | CORS / 限流 / Prometheus 指标 | 是 |
+| `httpx/middleware` | CORS / 限流 / Prometheus 指标 / Panic 恢复 | 是 |
 | `httpx/swagger` | Swagger UI 挂载：`Setup(r, basePath, specURL)` | 是 |
 | `httpx/captcha` | 图形验证码：`Generate()` / `Verify(id, answer)` | 是 |
 

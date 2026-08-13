@@ -1,0 +1,6 @@
+github.com/Effortful-lion/unibase/component/gpool v0.0.0-20260812153144-b3c7cce3cb8e h1:D+hRtlLQMMpnsuhjrR2Kcxc/4uoeEYGvfpPMdsbTCjQ=
+github.com/Effortful-lion/unibase/component/gpool v0.0.0-20260812153144-b3c7cce3cb8e/go.mod h1:/mC2Ww+Z5r6BnxhyuCQmBEyzpKdY1dWvdUabMlJ8PEU=
+github.com/Effortful-lion/unibase/component/schedule v0.0.0-20260812153144-b3c7cce3cb8e h1:wJW0Vl9aws8JgI8u3HmbHmlTKOpardVt39RVRe89130=
+github.com/Effortful-lion/unibase/component/schedule v0.0.0-20260812153144-b3c7cce3cb8e/go.mod h1:BQ/zGi+MiWj5zeLFE9fzrWpdv5TvH8SBZYfmoEFHX2A=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
