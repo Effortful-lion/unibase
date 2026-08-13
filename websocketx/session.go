@@ -145,19 +145,6 @@ func (s *Session) LeaveRoom(roomID string) {
 	s.mu.Unlock()
 }
 
-// roomsSnapshot 返回房间 ID 列表的快照（副本）。
-// 用于在外部持有锁时遍历房间，避免跨锁操作。
-func (s *Session) roomsSnapshot() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	rooms := make([]string, 0, len(s.rooms))
-	for r := range s.rooms {
-		rooms = append(rooms, r)
-	}
-	return rooms
-}
-
 // Rooms 返回当前所在的所有房间 ID。
 func (s *Session) Rooms() []string {
 	s.mu.RLock()
@@ -221,7 +208,7 @@ func (s *Session) checkMessageRate() bool {
 			valid++
 		}
 	}
-	s.messageTimes = s.messageTimes[:valid]
+	s.messageTimes = append([]time.Time{}, s.messageTimes[:valid]...)
 
 	// 检查是否已触顶
 	if valid >= s.messageRate {

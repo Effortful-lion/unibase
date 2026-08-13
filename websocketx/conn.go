@@ -53,21 +53,6 @@ func newConn(ws wsConn, codec MessageCodec, session *Session) *Conn {
 	return c
 }
 
-// newSyncConn 创建同步写入的 Conn（用于测试）。
-// sendCh 为 nil，Write 直接调用底层 WriteMessage，无异步延迟。
-func newSyncConn(ws wsConn, codec MessageCodec, session *Session) *Conn {
-	if codec == nil {
-		codec = JSONCodec
-	}
-	return &Conn{
-		conn:    ws,
-		codec:   codec,
-		session: session,
-		sendCh:  nil, // nil 表示同步模式
-		doneCh:  make(chan struct{}),
-	}
-}
-
 // Read 从连接读取一条 CmdMessage。
 // ctx 的 Deadline 会被透传到底层 ReadMessage。
 func (c *Conn) Read(ctx context.Context) (*CmdMessage, error) {
@@ -91,7 +76,6 @@ func (c *Conn) Read(ctx context.Context) (*CmdMessage, error) {
 // Write 向连接写入一条 CmdMessage。
 // 默认异步：经 codec 序列化后推入 sendCh，writePump 独立 goroutine 负责实际写入。
 // sendCh 满时丢弃最旧消息，保证不会阻塞调用方。
-// sync 模式（newSyncConn 创建）下直接同步写入，无缓冲。
 func (c *Conn) Write(ctx context.Context, msg *CmdMessage) error {
 	data, err := c.codec.Encode(msg)
 	if err != nil {
@@ -103,7 +87,6 @@ func (c *Conn) Write(ctx context.Context, msg *CmdMessage) error {
 		defer c.conn.SetWriteDeadline(time.Time{})
 	}
 
-	// sync 模式：直接写入（无 writePump）
 	if c.sendCh == nil {
 		c.writeMu.Lock()
 		_ = c.conn.WriteMessage(websocket.TextMessage, data)
@@ -238,19 +221,6 @@ func (c *Conn) writePump() {
 	}
 }
 
-// SetSendBufferSize 调整发送缓冲区大小（仅在连接创建前调用有效）。
-func (c *Conn) SetSendBufferSize(n int) {
-	_ = n // 实际缓冲大小在 newConn 时确定，此处为未来扩展预留
-}
-
-// setSyncWriteForTest 将底层 wsConn 替换为同步写版本（仅用于测试）。
-// 替换后 Write 直接调用 WriteMessage，writePump 不再有异步延迟。
-func (c *Conn) setSyncWriteForTest(ws wsConn) {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	c.conn = ws
-}
-
 // SendBufferUsage 返回当前发送缓冲区使用量（用于 metrics）。
 // sync 模式下返回 (0, 0)。
 func (c *Conn) SendBufferUsage() (used, capacity int) {
@@ -260,4 +230,24 @@ func (c *Conn) SendBufferUsage() (used, capacity int) {
 	used = len(c.sendCh)
 	capacity = cap(c.sendCh)
 	return
+}
+
+// Flush 等待 sendCh 中的所有消息发送完成。
+func (c *Conn) Flush() {
+	if c.sendCh == nil {
+		return
+	}
+	for {
+		select {
+		case data, ok := <-c.sendCh:
+			if !ok {
+				return
+			}
+			c.writeMu.Lock()
+			_ = c.conn.WriteMessage(websocket.TextMessage, data)
+			c.writeMu.Unlock()
+		default:
+			return
+		}
+	}
 }

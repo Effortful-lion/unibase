@@ -22,6 +22,7 @@ func (h *Hub) Broadcast(ctx context.Context, msg *CmdMessage, except ...string) 
 	}
 
 	var firstErr error
+	successCount := 0
 	for _, s := range sessions {
 		if exclude[s.ID()] {
 			continue
@@ -30,12 +31,14 @@ func (h *Hub) Broadcast(ctx context.Context, msg *CmdMessage, except ...string) 
 			if firstErr == nil {
 				firstErr = err
 			}
+		} else {
+			successCount++
 		}
 	}
 
 	if h.metrics.onBroadcast != nil {
 		h.metrics.onBroadcast(string(MetricEventBroadcast), StandardMetricLabels(MetricEventBroadcast, map[string]string{
-			"count": fmt.Sprintf("%d", len(sessions)-len(exclude)),
+			"count": fmt.Sprintf("%d", successCount),
 			"error": fmt.Sprintf("%v", firstErr),
 		}))
 	}
@@ -72,6 +75,7 @@ func (h *Hub) BroadcastToRoom(ctx context.Context, roomID string, msg *CmdMessag
 	}
 
 	var firstErr error
+	successCount := 0
 	for _, s := range sessions {
 		if exclude[s.ID()] {
 			continue
@@ -80,13 +84,15 @@ func (h *Hub) BroadcastToRoom(ctx context.Context, roomID string, msg *CmdMessag
 			if firstErr == nil {
 				firstErr = err
 			}
+		} else {
+			successCount++
 		}
 	}
 
 	if h.metrics.onBroadcast != nil {
 		h.metrics.onBroadcast(string(MetricEventBroadcastRoom), StandardMetricLabels(MetricEventBroadcastRoom, map[string]string{
 			"room_id": roomID,
-			"count":   fmt.Sprintf("%d", len(sessions)-len(exclude)),
+			"count":   fmt.Sprintf("%d", successCount),
 			"error":   fmt.Sprintf("%v", firstErr),
 		}))
 	}

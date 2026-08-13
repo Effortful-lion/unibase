@@ -906,6 +906,19 @@ func TestUpgrade_Integration(t *testing.T) {
 
 // ── 测试辅助 ──────────────────────────────────────────────────
 
+func newSyncConn(ws wsConn, codec MessageCodec, session *Session) *Conn {
+	if codec == nil {
+		codec = JSONCodec
+	}
+	return &Conn{
+		conn:    ws,
+		codec:   codec,
+		session: session,
+		sendCh:  nil,
+		doneCh:  make(chan struct{}),
+	}
+}
+
 type fakeConn struct {
 	mu          sync.Mutex
 	lastWritten interface{}

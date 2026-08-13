@@ -13,7 +13,9 @@ func (h *Hub) JoinRoom(session *Session, roomID string) {
 		h.roomIndex[roomID] = make(map[string]struct{})
 	}
 	h.roomIndex[roomID][session.id] = struct{}{}
+	session.mu.Lock()
 	session.rooms[roomID] = struct{}{}
+	session.mu.Unlock()
 }
 
 // LeaveRoom 将指定 Session 从房间移除。
@@ -21,7 +23,10 @@ func (h *Hub) LeaveRoom(session *Session, roomID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	session.mu.Lock()
 	delete(session.rooms, roomID)
+	session.mu.Unlock()
+
 	if members, ok := h.roomIndex[roomID]; ok {
 		delete(members, session.id)
 		if len(members) == 0 {

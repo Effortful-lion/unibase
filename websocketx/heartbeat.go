@@ -21,7 +21,7 @@ type Heartbeat struct {
 // StartHeartbeat 启动心跳保活。
 // 内部起两个 goroutine：ticker 定时发 Ping，pongWaiter 等待 Pong 超时则断开。
 // 调用 Stop() 或 Session 关闭时自动清理。
-func StartHeartbeat(session *Session, interval, pongWait time.Duration) *Heartbeat {
+func StartHeartbeat(ctx context.Context, session *Session, interval, pongWait time.Duration) *Heartbeat {
 	hb := &Heartbeat{
 		session:  session,
 		interval: interval,
@@ -45,10 +45,12 @@ func StartHeartbeat(session *Session, interval, pongWait time.Duration) *Heartbe
 		for {
 			select {
 			case <-ticker.C:
-				if err := session.Conn().Ping(context.Background()); err != nil {
+				if err := session.Conn().Ping(ctx); err != nil {
 					return
 				}
 			case <-hb.stopCh:
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -71,6 +73,8 @@ func StartHeartbeat(session *Session, interval, pongWait time.Duration) *Heartbe
 					return
 				}
 			case <-hb.stopCh:
+				return
+			case <-ctx.Done():
 				return
 			}
 		}

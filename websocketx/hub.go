@@ -85,7 +85,7 @@ func (h *Hub) runSession(ctx context.Context, conn *websocket.Conn, codec Messag
 	// 心跳（仅当配置了 interval 和 pongWait 时启用）
 	var hb *Heartbeat
 	if h.heartbeatInterval > 0 && h.heartbeatPongWait > 0 {
-		hb = StartHeartbeat(session, h.heartbeatInterval, h.heartbeatPongWait)
+		hb = StartHeartbeat(ctx, session, h.heartbeatInterval, h.heartbeatPongWait)
 	}
 
 	// 读循环
@@ -101,6 +101,7 @@ func (h *Hub) runSession(ctx context.Context, conn *websocket.Conn, codec Messag
 				Cmd:  msg.Cmd,
 				Meta: map[string]interface{}{"code": "10429", "message": "rate limit exceeded"},
 			})
+			session.Conn().Flush()
 			break
 		}
 
@@ -133,19 +134,17 @@ func (h *Hub) runSession(ctx context.Context, conn *websocket.Conn, codec Messag
 // register 将 Session 注册到 Hub（内部方法）。
 func (h *Hub) register(session *Session) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.sessions[session.id] = session
 	if session.userID != "" {
 		h.userIndex[session.userID] = session
 	}
+	h.mu.Unlock()
 	h.triggerOnConnect(session)
 }
 
 // unregister 从 Hub 注销 Session，清理房间映射和 userIndex。
 func (h *Hub) unregister(session *Session) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	delete(h.sessions, session.id)
 	if session.userID != "" {
 		delete(h.userIndex, session.userID)
@@ -159,6 +158,7 @@ func (h *Hub) unregister(session *Session) {
 			}
 		}
 	}
+	h.mu.Unlock()
 	h.triggerOnDisconnect(session)
 }
 
