@@ -74,7 +74,7 @@ var RecoverMiddleware Middleware = func(next Handler) Handler {
 		defer func() {
 			if r := recover(); r != nil {
 				if err := ctx.ReplyError(http.StatusInternalServerError, "panic: "+toError(r).Error()); err != nil {
-					logx.Default().Module("middleware").Error("reply panic failed", logx.Fields{"error": err})
+					logx.Default().Module("mux").Error("reply panic failed", logx.Fields{"error": err})
 				}
 			}
 		}()

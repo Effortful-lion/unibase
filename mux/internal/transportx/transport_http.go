@@ -39,7 +39,7 @@ type HTTPTransport struct {
 // NewHTTPTransport 创建 HTTP 传输层。
 func NewHTTPTransport(opts HTTPOptions) *HTTPTransport {
 	if opts.Logger == nil {
-		opts.Logger = logx.Default().Module("http")
+		opts.Logger = logx.Default().Module("mux")
 	}
 
 	engine := gin.New()

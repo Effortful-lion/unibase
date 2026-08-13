@@ -11,7 +11,7 @@ import (
 // logger 为 nil 时降级为 logx.Default()。
 func Log(logger *logx.Logger) gin.HandlerFunc {
 	if logger == nil {
-		logger = logx.Default().Module("httpx")
+		logger = logx.Default().Module("mux")
 	}
 
 	return func(c *gin.Context) {

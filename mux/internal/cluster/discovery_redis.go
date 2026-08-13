@@ -27,7 +27,7 @@ func NewRedisDiscovery(rdb *redis.Client, prefix string) *RedisDiscovery {
 	return &RedisDiscovery{
 		rdb:    rdb,
 		prefix: prefix,
-		logger: logx.Default().Module("cluster.discovery"),
+		logger: logx.Default().Module("mux"),
 	}
 }
 

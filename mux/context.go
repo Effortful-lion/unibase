@@ -38,7 +38,7 @@ type Context struct {
 	src       context.Context
 	requestID string
 
-	rawHTTP *gin.Context
+	rawHTTP *gin.Context // REST / CmdHTTP 模式有效；CmdWS 模式为 nil；Reply() 执行后置 nil，引用关系断开
 	rawWS   *msg.WSSession
 }
 
@@ -172,17 +172,20 @@ func (c *Context) Session() Session {
 func (c *Context) Reply(code int, body any) error {
 	switch c.mode {
 	case modeREST:
-		err := c.replyREST(code, body)
+		c.replyREST(code, body)
 		c.rawHTTP = nil
-		return err
+		return nil
 	case modeCmdHTTP:
-		err := c.replyCmdHTTP(code, body)
+		c.replyCmdHTTP(code, body)
 		c.rawHTTP = nil
-		return err
+		return nil
 	case modeCmdWS:
-		err := c.replyCmdWS(code, body)
+		if err := c.replyCmdWS(code, body); err != nil {
+			c.rawWS = nil
+			return err
+		}
 		c.rawWS = nil
-		return err
+		return nil
 	default:
 		return fmt.Errorf("mux: unsupported context mode %d", c.mode)
 	}
@@ -199,13 +202,12 @@ func (c *Context) ReplyError(code int, msg string) error {
 }
 
 // replyREST 写入 REST 响应（gin JSON）。
-func (c *Context) replyREST(code int, body any) error {
+func (c *Context) replyREST(code int, body any) {
 	c.rawHTTP.AbortWithStatusJSON(code, c.sanitize(body))
-	return nil
 }
 
 // replyCmdHTTP 写入 HTTP Cmd 响应（CmdMessage JSON）。
-func (c *Context) replyCmdHTTP(code int, body any) error {
+func (c *Context) replyCmdHTTP(code int, body any) {
 	resp := map[string]any{
 		"cmd":  c.cmd,
 		"head": map[string]any{"code": code},
@@ -214,7 +216,6 @@ func (c *Context) replyCmdHTTP(code int, body any) error {
 		resp["body"] = c.sanitize(body)
 	}
 	c.rawHTTP.AbortWithStatusJSON(code, resp)
-	return nil
 }
 
 // replyCmdWS 写入 WebSocket Cmd 响应（CmdMessage）。

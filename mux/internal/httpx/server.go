@@ -85,7 +85,7 @@ func RunWithShutdown(r *gin.Engine, addr string, opts ...ServerOption) error {
 
 	logger := cfg.logger
 	if logger == nil {
-		logger = logx.Default().Module("httpx")
+		logger = logx.Default().Module("mux")
 	}
 
 	srv := &http.Server{

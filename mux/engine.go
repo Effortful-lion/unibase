@@ -144,7 +144,7 @@ func (e *Engine) initCluster(o *engineOptions) {
 		advertiseAddr = o.httpAddr
 	}
 	if advertiseAddr == "" {
-		logx.Default().Module("engine").Warn("cluster enabled but no advertise addr, using :8080")
+		logx.Default().Module("mux").Warn("cluster enabled but no advertise addr, using :8080")
 		advertiseAddr = ":8080"
 	}
 
@@ -235,7 +235,7 @@ func (e *Engine) Serve(listener net.Listener) error {
 	go func() {
 		defer e.wg.Done()
 		if err := e.wsTransport.Serve(e.ctx); err != nil {
-			logx.Default().Module("engine").Error("websocket transport stopped", logx.Fields{"error": err})
+			logx.Default().Module("mux").Error("websocket transport stopped", logx.Fields{"error": err})
 		}
 	}()
 
@@ -315,6 +315,11 @@ func (e *Engine) Use(mws ...gin.HandlerFunc) {
 func (e *Engine) UsePipeline(p *Pipeline) {
 	p.engine = e
 	e.pipeline = p
+
+	// 同步 cmdPath：以 Engine 配置为准，Pipeline 默认值仅在未设置时生效
+	if p.cmdPath == "/v1/cmd" && e.opts.cmdPath != "/v1/cmd" {
+		p.cmdPath = e.opts.cmdPath
+	}
 
 	// 注册 HTTP Cmd 入口
 	e.httpEngine.POST(p.cmdPath, p.CmdHTTPHandler())

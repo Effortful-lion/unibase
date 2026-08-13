@@ -119,7 +119,7 @@ func (r *Router) Handle(ctx context.Context, session *Session, msg *CmdMessage) 
 		err := entry.handler(ctx, session, msg)
 		if err != nil {
 			if replyErr := Reply(ctx, session.Conn(), msg, "10500", err); replyErr != nil {
-				logx.Default().Module("router").Error("reply handler error failed", logx.Fields{"error": replyErr, "cmd": msg.Cmd})
+				logx.Default().Module("mux").Error("reply handler error failed", logx.Fields{"error": replyErr, "cmd": msg.Cmd})
 			}
 		}
 		return nil
@@ -153,7 +153,7 @@ var RecoverMiddleware MiddlewareFunc = func(ctx context.Context, session *Sessio
 	defer func() {
 		if r := recover(); r != nil {
 			if replyErr := Reply(ctx, session.Conn(), msg, "10500", fmt.Errorf("panic: %v", r)); replyErr != nil {
-				logx.Default().Module("router").Error("reply panic failed", logx.Fields{"error": replyErr, "cmd": msg.Cmd})
+				logx.Default().Module("mux").Error("reply panic failed", logx.Fields{"error": replyErr, "cmd": msg.Cmd})
 			}
 		}
 	}()

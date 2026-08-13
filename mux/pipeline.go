@@ -227,7 +227,9 @@ func (p *Pipeline) CmdHTTPHandler() gin.HandlerFunc {
 
 		session := msg.NewHTTPRequestSession()
 		muxCtx := newCmdHTTPContext(c, req.Cmd, req.Body, session)
-		p.executeCmd(muxCtx)
+		if err := p.executeCmd(muxCtx); err != nil {
+			logx.Default().Module("mux").Error("cmd execution failed", logx.Fields{"error": err, "cmd": req.Cmd})
+		}
 	}
 }
 
@@ -236,7 +238,10 @@ func (p *Pipeline) CmdWSHandler() websocketx.MessageHandler {
 	return func(ctx context.Context, session *websocketx.Session, cmdMsg *websocketx.CmdMessage) error {
 		wsSession := msg.NewWSSession(session)
 		muxCtx := newCmdWSContext(ctx, cmdMsg.Cmd, cmdMsg.Body, wsSession)
-		return p.executeCmd(muxCtx)
+		if err := p.executeCmd(muxCtx); err != nil {
+			logx.Default().Module("mux").Error("cmd execution failed", logx.Fields{"error": err, "cmd": cmdMsg.Cmd})
+		}
+		return nil // 错误已通过 ReplyError 回复给客户端
 	}
 }
 
@@ -247,28 +252,35 @@ func (p *Pipeline) wrapRESTHandler(path string, h Handler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := msg.NewHTTPRequestSession()
 		muxCtx := newRESTContext(c, session)
-		p.executeHandler(muxCtx, path, h)
+		if err := p.executeHandler(muxCtx, path, h); err != nil {
+			logx.Default().Module("mux").Error("rest handler execution failed", logx.Fields{"error": err, "path": path})
+		}
 	}
 }
 
-// executeHandler 执行单个 Handler（带中间件链）。
-func (p *Pipeline) executeHandler(ctx *Context, path string, h Handler) {
+// executeHandler 执行单个 Handler（带中间件链），错误返回给上层显式处理。
+func (p *Pipeline) executeHandler(ctx *Context, path string, h Handler) error {
 	wrapped := p.buildChain(path, h)
 	if err := wrapped(ctx); err != nil {
-		ctx.ReplyError(http.StatusInternalServerError, err.Error())
+		if replyErr := ctx.ReplyError(http.StatusInternalServerError, err.Error()); replyErr != nil {
+			logx.Default().Module("mux").Error("reply error response failed", logx.Fields{"error": replyErr})
+		}
+		return err
 	}
+	return nil
 }
 
-// executeCmd 执行 Cmd 路由（查找路由表 + 中间件链）。
+// executeCmd 执行 Cmd 路由（查找路由表 + 中间件链），错误返回给上层显式处理。
 func (p *Pipeline) executeCmd(ctx *Context) error {
 	entry, ok := p.cmdRoutes[ctx.Cmd()]
 	if !ok {
-		ctx.ReplyError(http.StatusNotFound, "cmd not found: "+ctx.Cmd())
-		return nil
+		if replyErr := ctx.ReplyError(http.StatusNotFound, "cmd not found: "+ctx.Cmd()); replyErr != nil {
+			logx.Default().Module("mux").Error("reply not found response failed", logx.Fields{"error": replyErr})
+		}
+		return fmt.Errorf("mux: cmd not found: %s", ctx.Cmd())
 	}
 
-	p.executeHandler(ctx, ctx.Cmd(), entry.handler)
-	return nil
+	return p.executeHandler(ctx, ctx.Cmd(), entry.handler)
 }
 
 // buildChain 构建完整的中间件链：全局 + 前缀匹配 + 路由级。

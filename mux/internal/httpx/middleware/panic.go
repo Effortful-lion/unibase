@@ -47,7 +47,7 @@ func Panic(opts ...PanicOption) gin.HandlerFunc {
 
 	logger := cfg.logger
 	if logger == nil {
-		logger = logx.Default().Module("httpx")
+		logger = logx.Default().Module("mux")
 	}
 
 	return func(c *gin.Context) {

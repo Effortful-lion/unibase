@@ -34,7 +34,7 @@ func NewClusterManager(ctx context.Context, self ClusterNode, discovery Discover
 		opt(o)
 	}
 
-	logger := logx.Default().Module("cluster")
+	logger := logx.Default().Module("mux")
 
 	cm := &ClusterManager{
 		ctx:       cctx,
@@ -46,6 +46,7 @@ func NewClusterManager(ctx context.Context, self ClusterNode, discovery Discover
 		heartbeat: o.heartbeatInterval,
 		nodeTTL:   o.nodeTTL,
 		logger:    logger,
+		closeFn:   o.closeFn,
 	}
 
 	return cm
@@ -54,7 +55,7 @@ func NewClusterManager(ctx context.Context, self ClusterNode, discovery Discover
 // WithCloseFn 设置集群管理器停止时的清理函数（如关闭 Redis 连接）。
 func WithCloseFn(fn func() error) ClusterOption {
 	return func(o *clusterOptions) {
-		_ = fn // 存储到 ClusterManager
+		o.closeFn = fn
 	}
 }
 
@@ -182,6 +183,7 @@ type clusterOptions struct {
 	heartbeatInterval time.Duration
 	nodeTTL           time.Duration
 	cmdPath           string
+	closeFn           func() error
 }
 
 func defaultClusterOptions() *clusterOptions {
