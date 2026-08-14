@@ -30,6 +30,8 @@ var (
 	ErrKafkaInitFailed  = &AdapterError{code: "kafka_init_failed", message: "kafka initialization failed"}
 	ErrMongoInitFailed  = &AdapterError{code: "mongo_init_failed", message: "mongodb initialization failed"}
 	ErrPrometheusFailed = &AdapterError{code: "prometheus_init_failed", message: "prometheus initialization failed"}
+	ErrAlipayNotInit    = &AdapterError{code: "alipay_not_init", message: "alipay adapter not initialized"}
+	ErrMinIONotInit     = &AdapterError{code: "minio_not_init", message: "minio adapter not initialized"}
 )
 
 // IsAdapterError 判断是否为 AdapterError。

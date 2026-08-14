@@ -21,6 +21,8 @@ type Config struct {
 	Kafka      *KafkaConfig
 	Prometheus *PrometheusConfig
 	Mongo      *MongoConfig
+	Alipay     *AlipayConfig
+	MinIO      *MinIOConfig
 }
 
 // Client 聚合所有已初始化的第三方服务客户端。
@@ -32,6 +34,8 @@ type Client struct {
 	kafka      *Kafka
 	prometheus *Prometheus
 	mongo      *Mongo
+	alipay     *Alipay
+	minio      *MinIO
 	logger     *logx.Logger
 }
 
@@ -97,6 +101,24 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		}
 	}
 
+	if cfg.Alipay != nil {
+		alipay, err := NewAlipay(*cfg.Alipay)
+		if err != nil {
+			opt.logger.Warn("alipay init failed", logx.Fields{"err": err.Error()})
+		} else {
+			client.alipay = alipay
+		}
+	}
+
+	if cfg.MinIO != nil {
+		minio, err := NewMinIO(*cfg.MinIO)
+		if err != nil {
+			opt.logger.Warn("minio init failed", logx.Fields{"err": err.Error()})
+		} else {
+			client.minio = minio
+		}
+	}
+
 	return client, nil
 }
 
@@ -130,3 +152,9 @@ func UnmarshalConfig(data map[string]any) (*Config, error) {
 
 	return &cfg, nil
 }
+
+// Alipay 返回支付宝适配器，未配置时为 nil。
+func (c *Client) Alipay() *Alipay { return c.alipay }
+
+// MinIO 返回 MinIO 适配器，未配置时为 nil。
+func (c *Client) MinIO() *MinIO { return c.minio }
