@@ -43,6 +43,11 @@ func (h *Hub) Broadcast(ctx context.Context, msg *CmdMessage, except ...string) 
 		}))
 	}
 
+	// 跨 AP 广播
+	if h.broadcastBus != nil {
+		_ = h.broadcastBus.Publish(ctx, msg, "", except, h.nodeID)
+	}
+
 	return firstErr
 }
 
@@ -97,30 +102,40 @@ func (h *Hub) BroadcastToRoom(ctx context.Context, roomID string, msg *CmdMessag
 		}))
 	}
 
+	// 跨 AP 广播
+	if h.broadcastBus != nil {
+		_ = h.broadcastBus.Publish(ctx, msg, roomID, except, h.nodeID)
+	}
+
 	return firstErr
 }
 
 // BroadcastToUser 向指定 userID 的 Session 发消息。
 // 用户不在线时静默返回 nil。
+// 集群模式下，如果用户不在本地，通过 broadcastBus 发布到其他 AP 节点。
 func (h *Hub) BroadcastToUser(ctx context.Context, userID string, msg *CmdMessage) error {
 	h.mu.RLock()
 	session, ok := h.userIndex[userID]
 	h.mu.RUnlock()
 
-	if !ok {
+	if ok {
+		if err := session.Conn().Write(ctx, msg); err != nil {
+			return err
+		}
+
+		if h.metrics.onBroadcast != nil {
+			h.metrics.onBroadcast(string(MetricEventBroadcast), StandardMetricLabels(MetricEventBroadcast, map[string]string{
+				"target":     "user",
+				"user_id":    userID,
+				"session_id": session.ID(),
+			}))
+		}
 		return nil
 	}
 
-	if err := session.Conn().Write(ctx, msg); err != nil {
-		return err
-	}
-
-	if h.metrics.onBroadcast != nil {
-		h.metrics.onBroadcast(string(MetricEventBroadcast), StandardMetricLabels(MetricEventBroadcast, map[string]string{
-			"target":     "user",
-			"user_id":    userID,
-			"session_id": session.ID(),
-		}))
+	// 本地未找到，尝试跨 AP 广播
+	if h.broadcastBus != nil {
+		_ = h.broadcastBus.Publish(ctx, msg, "", nil, h.nodeID)
 	}
 	return nil
 }

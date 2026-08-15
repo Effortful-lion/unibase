@@ -30,11 +30,21 @@ type Hub struct {
 	metrics             hubMetrics
 	wg                  sync.WaitGroup // 跟踪活跃的 runSession goroutine
 	handlerTimeout      time.Duration  // 单条消息处理超时，0 表示不限制
+	nodeID              string         // 当前 AP 节点唯一标识，用于跨 AP 广播去重
 
 	// 全局连接初始化回调（所有连接共享，可通过 WithSessionInit 配置）。
 	// 读写通过 initMu 保护，per-request 的 init 通过 context 传递。
 	initSessionFn func(*Session)
 	initMu        sync.RWMutex
+
+	// 跨 AP Session 注册表（将 userID 映射到 AP 节点地址）
+	sessionRegistry SessionRegistry
+
+	// 跨 AP 广播总线（Redis Pub/Sub）
+	broadcastBus BroadcastBus
+
+	// 测试用：Session 注册完成通知 channel
+	registerCh chan string
 }
 
 // contextKey 用于在 context 中传递 per-connection 的初始化回调。
@@ -82,7 +92,12 @@ func (h *Hub) handleConnection(ctx context.Context, conn wsConn, codec MessageCo
 	return nil
 }
 
-// runSession 执行单条连接的完整生命周期（注册 → 心跳 → 读循环 → 注销）。
+// runSession 执行单条连接的完整生命周期：
+//  1. 创建 Session 并应用初始化回调（注入 JWT token 等）
+//  2. 注册到 Hub（内存 sessions/userIndex + Redis SessionRegistry）
+//  3. 启动心跳保活（Ping/Pong）
+//  4. 读循环：逐条读取消息 → 速率检查 → 调用 handler
+//  5. 断开后注销（清理内存索引 + Redis SessionRegistry）
 func (h *Hub) runSession(ctx context.Context, conn wsConn, codec MessageCodec, handler MessageHandler) {
 	session := newSession(conn, codec)
 	session.hub = h
@@ -188,10 +203,25 @@ func (h *Hub) runSession(ctx context.Context, conn wsConn, codec MessageCodec, h
 func (h *Hub) register(session *Session) {
 	h.mu.Lock()
 	h.sessions[session.id] = session
-	if session.userID != "" {
-		h.userIndex[session.userID] = session
+	userID := session.userID
+	if userID != "" {
+		h.userIndex[userID] = session
 	}
 	h.mu.Unlock()
+
+	// 向 Redis 注册 Session 映射（userID 已快照，避免并发 SetUserID 竞态）
+	if userID != "" && h.sessionRegistry != nil {
+		_ = h.sessionRegistry.Register(context.Background(), "", userID, h.nodeID)
+	}
+
+	// 通知注册完成（测试同步用）
+	if h.registerCh != nil {
+		select {
+		case h.registerCh <- session.id:
+		default:
+		}
+	}
+
 	h.triggerOnConnect(session)
 }
 
@@ -199,8 +229,9 @@ func (h *Hub) register(session *Session) {
 func (h *Hub) unregister(session *Session) {
 	h.mu.Lock()
 	delete(h.sessions, session.id)
-	if session.userID != "" {
-		delete(h.userIndex, session.userID)
+	userID := session.userID
+	if userID != "" {
+		delete(h.userIndex, userID)
 	}
 
 	for roomID := range session.rooms {
@@ -212,6 +243,12 @@ func (h *Hub) unregister(session *Session) {
 		}
 	}
 	h.mu.Unlock()
+
+	// 从 Redis 注销 Session 映射（userID 已快照，避免并发 SetUserID 竞态）
+	if userID != "" && h.sessionRegistry != nil {
+		_ = h.sessionRegistry.Unregister(context.Background(), "", userID)
+	}
+
 	h.triggerOnDisconnect(session)
 }
 
@@ -266,6 +303,23 @@ func (h *Hub) SetSessionInit(fn func(*Session)) {
 	h.initMu.Unlock()
 }
 
+// SetNodeID 设置当前 AP 节点唯一标识（用于跨 AP 广播去重）。
+func (h *Hub) SetNodeID(nodeID string) {
+	h.mu.Lock()
+	h.nodeID = nodeID
+	h.mu.Unlock()
+}
+
+// SetSessionRegistry 设置 Session 注册表（用于跨 AP 定位用户连接）。
+func (h *Hub) SetSessionRegistry(registry SessionRegistry) {
+	h.sessionRegistry = registry
+}
+
+// SetBroadcastBus 设置跨 AP 广播总线。
+func (h *Hub) SetBroadcastBus(bus BroadcastBus) {
+	h.broadcastBus = bus
+}
+
 // Shutdown 优雅关闭：关闭所有现有连接，等待所有 goroutine 退出，返回第一个错误（如有）。
 func (h *Hub) Shutdown(ctx context.Context) error {
 	h.mu.RLock()
@@ -284,5 +338,17 @@ func (h *Hub) Shutdown(ctx context.Context) error {
 
 	// 等待所有 runSession goroutine 退出
 	h.wg.Wait()
+
+	// 关闭跨 AP 广播总线
+	if h.broadcastBus != nil {
+		_ = h.broadcastBus.Close()
+	}
+
 	return firstErr
+}
+
+// Wait 等待所有 runSession goroutine 退出。
+// 用于测试中确保异步操作（如 Kick 触发的 unregister）已完成。
+func (h *Hub) Wait() {
+	h.wg.Wait()
 }

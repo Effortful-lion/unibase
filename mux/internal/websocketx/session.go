@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // Meta 是连接元数据，在 Upgrade 阶段注入，后续只读。
@@ -60,22 +62,47 @@ func (s *Session) UserID() string {
 
 // SetUserID 绑定用户 ID。
 // 若 Session 已注册到 Hub，同步更新 Hub.userIndex。
+// 若同一 userID 已绑定到另一个 Session（网络切换场景），踢掉旧连接后覆盖。
 func (s *Session) SetUserID(userID string) {
 	s.mu.Lock()
 	oldID := s.userID
 	s.userID = userID
 	s.mu.Unlock()
 
-	if s.hub != nil && oldID != userID {
-		s.hub.mu.Lock()
-		if oldID != "" {
-			delete(s.hub.userIndex, oldID)
-		}
-		if userID != "" {
-			s.hub.userIndex[userID] = s
-		}
-		s.hub.mu.Unlock()
+	if s.hub == nil || oldID == userID {
+		return
 	}
+
+	s.hub.mu.Lock()
+
+	// 移除旧 userID 的映射
+	if oldID != "" {
+		delete(s.hub.userIndex, oldID)
+	}
+
+	// 新 userID 冲突检测：同一 userID 已在另一个 Session 上
+	if userID != "" {
+		if existing, exists := s.hub.userIndex[userID]; exists && existing != s {
+			// 捕获冲突会话引用，从 index 移除后踢掉
+			conflictSession := existing
+			delete(s.hub.userIndex, userID)
+			s.hub.userIndex[userID] = s
+			s.hub.mu.Unlock()
+			_ = kickSession(conflictSession)
+			return
+		}
+		s.hub.userIndex[userID] = s
+	}
+
+	s.hub.mu.Unlock()
+}
+
+// kickSession 踢掉指定 session 的连接（不持有 hub 锁）。
+func kickSession(session *Session) error {
+	if session == nil || session.hub == nil || session.conn == nil {
+		return nil
+	}
+	return session.Conn().Close(websocket.CloseGoingAway, string(session.hub.closeReasonKick))
 }
 
 // Conn 返回底层的 Conn 封装。
@@ -256,4 +283,18 @@ func (s *Session) MessageRate() int {
 	s.messageMu.Lock()
 	defer s.messageMu.Unlock()
 	return s.messageRate
+}
+
+// NewTestSession 创建测试用 Session，设置 ID 和 Meta。仅用于测试。
+func NewTestSession(id string, meta Meta) *Session {
+	s := &Session{
+		id:    id,
+		meta:  make(Meta),
+		state: make(map[string]interface{}),
+		rooms: make(map[string]struct{}),
+	}
+	for k, v := range meta {
+		s.meta[k] = v
+	}
+	return s
 }

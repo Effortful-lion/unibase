@@ -84,3 +84,28 @@ func WithSessionInit(fn func(*Session)) HubOption {
 		h.initSessionFn = fn
 	}
 }
+
+// ── 跨 AP 集群 ──────────────────────────────────────────────
+
+// WithSessionRegistry 设置 Session 注册表，用于跨 AP 节点定位用户连接。
+// 典型实现：NewRedisSessionRegistry(rdb)
+func WithSessionRegistry(registry SessionRegistry) HubOption {
+	return func(h *Hub) {
+		h.sessionRegistry = registry
+	}
+}
+
+// WithBroadcastBus 设置跨 AP 广播总线，用于将广播消息分发到集群其他节点。
+// 典型实现：NewRedisBroadcastBus(rdb, group, nodeID)
+func WithBroadcastBus(bus BroadcastBus) HubOption {
+	return func(h *Hub) {
+		h.broadcastBus = bus
+	}
+}
+
+// WithNodeID 设置当前 AP 节点的唯一标识，用于跨 AP 广播去重。
+func WithNodeID(nodeID string) HubOption {
+	return func(h *Hub) {
+		h.nodeID = nodeID
+	}
+}

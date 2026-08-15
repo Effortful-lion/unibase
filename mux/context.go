@@ -15,9 +15,9 @@ import (
 type contextMode uint8
 
 const (
-	modeREST    contextMode = iota // RESTful 路由（gin 直接调用）
-	modeCmdHTTP                    // HTTP Cmd 入口（POST /v1/cmd）
-	modeCmdWS                      // WebSocket Cmd（WS 消息）
+	modeREST    contextMode = iota // RESTful 路由（gin 直接调用，Bind 用 gin.ShouldBind）
+	modeCmdHTTP                    // HTTP Cmd 入口（POST /v1/cmd，Bind 用 json.Unmarshal）
+	modeCmdWS                      // WebSocket Cmd（WS 消息，Bind 用 json.Unmarshal）
 )
 
 // Protocol 标识传输协议类型。

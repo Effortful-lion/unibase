@@ -63,3 +63,11 @@ func CRC32(data []byte) []byte {
 func CRC32Hex(data []byte) string {
 	return hex.EncodeToString(crc32Sum(data))
 }
+
+// CRC32Uint32 计算 CRC32 (IEEE) 哈希，返回 uint32 值。
+// 用于一致性哈希等需要数值哈希的场景。
+func CRC32Uint32(data []byte) uint32 {
+	h := crc32.NewIEEE()
+	h.Write(data)
+	return h.Sum32()
+}

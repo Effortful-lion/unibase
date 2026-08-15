@@ -66,6 +66,11 @@ func (t *HTTPTransport) SetServer(srv *http.Server) {
 	t.srv = srv
 }
 
+// SetEngine 替换底层 gin.Engine，用于纯 WebSocket 模式使用最小引擎承载 Upgrade。
+func (t *HTTPTransport) SetEngine(engine *gin.Engine) {
+	t.engine = engine
+}
+
 // Serve 启动 HTTP 服务（阻塞）。
 func (t *HTTPTransport) Serve(ctx context.Context) error {
 	t.srv = &http.Server{

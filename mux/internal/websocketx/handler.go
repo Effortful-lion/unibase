@@ -11,12 +11,14 @@ import (
 type UpgradeOption func(*upgradeConfig)
 
 type upgradeConfig struct {
-	checkOrigin      func(*http.Request) bool
-	handshakeTimeout time.Duration
-	readBufferSize   int
-	writeBufferSize  int
-	maxMessageSize   int64
-	codec            MessageCodec
+	checkOrigin       func(*http.Request) bool
+	handshakeTimeout  time.Duration
+	readBufferSize    int
+	writeBufferSize   int
+	maxMessageSize    int64
+	codec             MessageCodec
+	enableCompression bool
+	compressionLevel  int
 }
 
 // WithCheckOrigin 自定义跨域校验函数。
@@ -64,6 +66,17 @@ func WithCodec(codec MessageCodec) UpgradeOption {
 	}
 }
 
+// WithCompression 启用 WebSocket permessage-deflate 压缩。
+// level 为压缩级别：1=BestSpeed ~ 9=BestCompression，-1=DefaultCompression。
+// 适用于消息体较大的 IM 场景，可显著降低带宽。
+// 注意：压缩会增加 CPU 开销，小消息（< 1KB）可能因压缩头开销反而增大。
+func WithCompression(level int) UpgradeOption {
+	return func(c *upgradeConfig) {
+		c.enableCompression = true
+		c.compressionLevel = level
+	}
+}
+
 // Upgrade 创建一个 http.Handler，负责将 HTTP 请求升级为 WebSocket 连接。
 //
 // hub: 连接管理（注册、注销、广播）
@@ -95,10 +108,18 @@ func Upgrade(hub *Hub, handler MessageHandler, opts ...UpgradeOption) http.Handl
 		WriteBufferSize:  cfg.writeBufferSize,
 	}
 
+	if cfg.enableCompression {
+		upgrader.EnableCompression = true
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
+		}
+
+		if cfg.enableCompression && cfg.compressionLevel != 0 {
+			_ = conn.SetCompressionLevel(cfg.compressionLevel)
 		}
 
 		if err := hub.handleConnection(r.Context(), conn, cfg.codec, handler); err != nil {
@@ -109,7 +130,8 @@ func Upgrade(hub *Hub, handler MessageHandler, opts ...UpgradeOption) http.Handl
 }
 
 // defaultCheckOrigin 默认跨域校验：仅允许相同来源或无 Origin 的请求。
-// 生产环境应通过 WithCheckOrigin 显式配置允许的来源列表。
+// 空 Origin 放行是因为 curl、移动端 SDK 等非浏览器客户端不发送 Origin header。
+// 生产环境应通过 WithCheckOrigin 显式配置允许的来源白名单，不依赖此默认值。
 func defaultCheckOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

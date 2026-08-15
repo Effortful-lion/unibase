@@ -1,5 +1,9 @@
 // Package middleware 提供 Gin 常用中间件。
 //
+// 注意：此包为 gin 原生中间件工具箱，适用于直接使用 gin.Engine 的场景。
+// mux 用户应优先使用 mux 包提供的 Pipeline 中间件（mux.Auth、mux.RateLimit 等），
+// 可获得 HTTP + WebSocket 统一覆盖。此包中的中间件仅作用于 HTTP REST 路由。
+//
 // 快速开始：
 //
 //	// 日志中间件（可注入 logx logger）

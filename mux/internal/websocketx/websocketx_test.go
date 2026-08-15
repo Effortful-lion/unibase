@@ -1077,9 +1077,13 @@ func (f *fakeConn) GetWritten() interface{} {
 
 type fakeWebSocketConn struct {
 	writeData *fakeConn
+	closed    bool
 }
 
 func (f *fakeWebSocketConn) ReadMessage() (messageType int, data []byte, err error) {
+	if f.closed {
+		return 0, nil, fmt.Errorf("%s", websocket.FormatCloseMessage(websocket.CloseNormalClosure, "connection closed"))
+	}
 	return 0, nil, nil
 }
 
@@ -1099,7 +1103,10 @@ func (f *fakeWebSocketConn) SetPongHandler(h func(string) error) {}
 func (f *fakeWebSocketConn) SetReadLimit(n int64)               {}
 func (f *fakeWebSocketConn) SetReadDeadline(t time.Time) error  { return nil }
 func (f *fakeWebSocketConn) SetWriteDeadline(t time.Time) error { return nil }
-func (f *fakeWebSocketConn) Close() error                       { return nil }
+func (f *fakeWebSocketConn) Close() error {
+	f.closed = true
+	return nil
+}
 
 // ── 基准测试 ──────────────────────────────────────────────────
 
@@ -1143,4 +1150,162 @@ func BenchmarkHub_RegisterUnregister(b *testing.B) {
 			hub.Unregister(session.ID())
 		}
 	})
+}
+
+// ── Session.SetUserID 冲突处理测试（网络切换场景）───────────────
+
+func TestSession_SetUserID_ConflictReplacesUserIndex(t *testing.T) {
+	// Verify that when two sessions claim the same userID,
+	// the second session replaces the first in Hub.userIndex
+	hub := NewHub(0)
+
+	s1 := NewTestSession("s_001", make(Meta))
+	s2 := NewTestSession("s_002", make(Meta))
+	hub.Register(s1)
+	hub.Register(s2)
+
+	// s1 claims user_001 first
+	s1.SetUserID("user_001")
+	if got, ok := hub.GetSessionByUserID("user_001"); !ok || got != s1 {
+		t.Error("s1 should be bound to user_001")
+	}
+
+	// s2 claims the same user_001, should replace s1 in userIndex
+	s2.SetUserID("user_001")
+
+	got, ok := hub.GetSessionByUserID("user_001")
+	if !ok || got != s2 {
+		t.Errorf("s2 should replace s1 in userIndex, got ok=%v session=%v", ok, got)
+	}
+
+	// s2 userID should be set
+	if s2.UserID() != "user_001" {
+		t.Errorf("s2.UserID: got %q, want user_001", s2.UserID())
+	}
+}
+
+func TestSession_SetUserID_ConflictKicksOldSession(t *testing.T) {
+	// Verify that the old session's connection is closed when a conflict occurs
+	hub := NewHub(0)
+
+	fakeConn1 := &fakeWebSocketConn{writeData: newFakeConn()}
+	s1 := NewTestSession("s_001", make(Meta))
+	s1.conn = newConn(fakeConn1, JSONCodec, s1)
+
+	fakeConn2 := &fakeWebSocketConn{writeData: newFakeConn()}
+	s2 := NewTestSession("s_002", make(Meta))
+	s2.conn = newConn(fakeConn2, JSONCodec, s2)
+
+	hub.Register(s1)
+	hub.Register(s2)
+
+	s1.SetUserID("user_001")
+	s2.SetUserID("user_001") // triggers kick on s1
+
+	// Verify s1's connection was closed (kick signal)
+	if !fakeConn1.closed {
+		t.Error("s1's connection should be closed after conflict kick")
+	}
+
+	// Verify userIndex now points to s2
+	if got, ok := hub.GetSessionByUserID("user_001"); !ok || got != s2 {
+		t.Error("s2 should be in userIndex after conflict")
+	}
+}
+
+func TestSession_SetUserID_NoConflictSameID(t *testing.T) {
+	// Setting the same userID on the same session should be a no-op
+	hub := NewHub(0)
+	s := NewTestSession("s_001", make(Meta))
+	hub.Register(s)
+
+	s.SetUserID("user_001")
+	s.SetUserID("user_001") // same ID again
+
+	if got, ok := hub.GetSessionByUserID("user_001"); !ok || got != s {
+		t.Error("session should still be bound to user_001")
+	}
+}
+
+func TestSession_SetUserID_ClearUserID(t *testing.T) {
+	hub := NewHub(0)
+	s := NewTestSession("s_001", make(Meta))
+	hub.Register(s)
+
+	s.SetUserID("user_001")
+	if _, ok := hub.GetSessionByUserID("user_001"); !ok {
+		t.Error("user_001 should be in userIndex")
+	}
+
+	// Clear userID
+	s.SetUserID("")
+	if _, ok := hub.GetSessionByUserID("user_001"); ok {
+		t.Error("user_001 should be removed from userIndex when cleared")
+	}
+	if s.UserID() != "" {
+		t.Errorf("s.UserID: got %q, want empty", s.UserID())
+	}
+}
+
+// ── noopSessionRegistry 测试 ──────────────────────────────────
+
+func TestNoopSessionRegistry(t *testing.T) {
+	var reg SessionRegistry = &noopSessionRegistry{}
+
+	ctx := context.Background()
+	if err := reg.Register(ctx, "group1", "user1", "ap1:8080"); err != nil {
+		t.Errorf("Register should not return error for noop, got: %v", err)
+	}
+	if err := reg.Unregister(ctx, "group1", "user1"); err != nil {
+		t.Errorf("Unregister should not return error for noop, got: %v", err)
+	}
+	addr, ok := reg.Lookup(ctx, "group1", "user1")
+	if ok {
+		t.Errorf("Lookup should return false for noop, got addr=%q", addr)
+	}
+}
+
+// ── noopBroadcastBus 测试 ─────────────────────────────────────
+
+func TestNoopBroadcastBus(t *testing.T) {
+	var bus BroadcastBus = &noopBroadcastBus{}
+
+	ctx := context.Background()
+	msg := &CmdMessage{Cmd: "test", Body: json.RawMessage(`{}`)}
+	if err := bus.Publish(ctx, msg, "room1", nil, "node1"); err != nil {
+		t.Errorf("Publish should not return error for noop, got: %v", err)
+	}
+	if err := bus.Subscribe(ctx, func(ctx context.Context, msg *CmdMessage, roomID string, except []string) {}); err != nil {
+		t.Errorf("Subscribe should not return error for noop, got: %v", err)
+	}
+	if err := bus.Close(); err != nil {
+		t.Errorf("Close should not return error for noop, got: %v", err)
+	}
+}
+
+// ── NewTestSession 辅助函数测试 ───────────────────────────────
+
+func TestNewTestSession(t *testing.T) {
+	session := NewTestSession("test_id", Meta{"key": "value"})
+
+	if session.ID() != "test_id" {
+		t.Errorf("ID: got %q, want test_id", session.ID())
+	}
+	if session.Meta()["key"] != "value" {
+		t.Errorf("Meta: got %v", session.Meta())
+	}
+	if session.UserID() != "" {
+		t.Errorf("UserID should be empty, got %q", session.UserID())
+	}
+}
+
+func TestNewTestSession_NilMeta(t *testing.T) {
+	session := NewTestSession("test_id", nil)
+
+	if session.Meta() == nil {
+		t.Error("Meta should not be nil")
+	}
+	if len(session.Meta()) != 0 {
+		t.Errorf("Meta should be empty, got %v", session.Meta())
+	}
 }

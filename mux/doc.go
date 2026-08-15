@@ -24,6 +24,11 @@
 //
 // WebSocket 仅支持 Cmd 模式，不支持 RESTful。
 //
+// 中间件体系：
+//   - Pipeline 中间件（mux.Middleware）：覆盖所有入口（REST + HTTP Cmd + WS Cmd），推荐使用
+//   - gin 中间件（gin.HandlerFunc）：仅覆盖 HTTP REST 路由，通过 engine.Use() 注册
+//   - 两者可共存：gin 中间件在外层（HTTP only），Pipeline 中间件在内层（统一）
+//
 // 快速开始：
 //
 //	engine := mux.New(mux.WithMaxWebSocketConn(10000))

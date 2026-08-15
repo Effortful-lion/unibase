@@ -110,7 +110,7 @@ func (r *Router) Handle(ctx context.Context, session *Session, msg *CmdMessage) 
 	if !ok {
 		return session.Conn().Write(ctx, &CmdMessage{
 			Cmd:  msg.Cmd,
-			Meta: map[string]interface{}{"code": "10400", "message": "unknown cmd"},
+			Meta: map[string]any{"code": "10400", "message": "unknown cmd"},
 		})
 	}
 

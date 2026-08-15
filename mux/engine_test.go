@@ -379,6 +379,125 @@ func TestEngine_WithOptions(t *testing.T) {
 	}
 }
 
+// ── 协议开关测试 ──────────────────────────────────────────────
+
+func TestEngine_Default_BothEnabled(t *testing.T) {
+	engine := mux.New()
+
+	if engine.HTTP() == nil {
+		t.Error("HTTP engine should not be nil in default mode")
+	}
+	if engine.WS() == nil {
+		t.Error("WS router should not be nil in default mode")
+	}
+	if engine.WSHub() == nil {
+		t.Error("WS hub should not be nil in default mode")
+	}
+}
+
+func TestEngine_DisableWS_HTTPOnly(t *testing.T) {
+	engine := mux.New(mux.DisableWS())
+
+	if engine.HTTP() == nil {
+		t.Error("HTTP engine should not be nil in HTTP-only mode")
+	}
+	if engine.WS() != nil {
+		t.Error("WS router should be nil in HTTP-only mode")
+	}
+	if engine.WSHub() != nil {
+		t.Error("WS hub should be nil in HTTP-only mode")
+	}
+
+	// 验证 HTTP 路由正常工作
+	engine.HTTP().GET("/api/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	server := httptest.NewServer(engine)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/health")
+	if err != nil {
+		t.Fatalf("GET /api/health: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestEngine_DisableHTTP_WSOnly(t *testing.T) {
+	engine := mux.New(mux.DisableHTTP())
+
+	if engine.WS() == nil {
+		t.Error("WS router should not be nil in WS-only mode")
+	}
+	if engine.WSHub() == nil {
+		t.Error("WS hub should not be nil in WS-only mode")
+	}
+
+	// Serve() 之前 HTTP() 为 nil（transport 在启动时才创建）
+	if engine.HTTP() != nil {
+		t.Error("HTTP engine should be nil before Serve() in WS-only mode")
+	}
+
+	// 注册 WS Cmd
+	wsRouter := engine.WS()
+	wsRouter.Cmd("ping", func(ctx context.Context, session *websocketx.Session, msg *websocketx.CmdMessage) error {
+		return session.Conn().Write(ctx, &websocketx.CmdMessage{
+			Cmd:  msg.Cmd,
+			Meta: map[string]interface{}{"code": "10200"},
+			Body: json.RawMessage(`{"reply":"pong"}`),
+		})
+	})
+
+	// 启动服务
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	go engine.Serve(listener)
+	defer listener.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// 启动后 HTTP() 返回承载 Upgrade 的最小引擎
+	if engine.HTTP() == nil {
+		t.Error("HTTP engine should not be nil after Serve() in WS-only mode")
+	}
+
+	// 验证 WebSocket 连接
+	wsURL := "ws://" + listener.Addr().String() + "/ws"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+
+	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	if err := ws.WriteJSON(websocketx.CmdMessage{
+		Cmd:  "ping",
+		Body: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	var resp websocketx.CmdMessage
+	if err := ws.ReadJSON(&resp); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	code, _ := resp.Meta["code"].(string)
+	if code != "10200" {
+		t.Errorf("code: got %q, want 10200", code)
+	}
+}
+
 // ── 集成 Demo：Chat Server ────────────────────────────────────
 // TestChatDemo 演示如何使用 mux 构建一个完整的 Chat 服务。
 // 包含 HTTP API（健康检查、房间列表）和 WebSocket（加入房间、发送消息、离开房间）。

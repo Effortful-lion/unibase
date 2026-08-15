@@ -24,6 +24,9 @@ type ClusterManager struct {
 	wg        sync.WaitGroup
 	nodesMu   sync.RWMutex
 	closeFn   func() error // 清理资源（如关闭 Redis 连接）
+
+	// 一致性哈希环（user_id / session_id → 节点路由）
+	ring *HashRing
 }
 
 // NewClusterManager 创建集群管理器。
@@ -47,6 +50,7 @@ func NewClusterManager(ctx context.Context, self ClusterNode, discovery Discover
 		nodeTTL:   o.nodeTTL,
 		logger:    logger,
 		closeFn:   o.closeFn,
+		ring:      NewHashRing(DefaultHashRingOptions()),
 	}
 
 	return cm
@@ -111,6 +115,12 @@ func (cm *ClusterManager) Forward(ctx context.Context, target *ClusterNode, msg 
 	return cm.forward.Forward(ctx, target, msg)
 }
 
+// RouteUser 根据 user_id 通过一致性哈希查找目标节点。
+// 返回 (nil, false) 表示无可用节点。
+func (cm *ClusterManager) RouteUser(userID string) (ClusterNode, bool) {
+	return cm.ring.Get(userID)
+}
+
 // heartbeatLoop 定时向 Redis 注册当前节点。
 func (cm *ClusterManager) heartbeatLoop() {
 	for {
@@ -132,6 +142,8 @@ func (cm *ClusterManager) heartbeatLoop() {
 }
 
 // discoveryLoop 定时拉取节点列表，增量更新而非全量替换。
+// 增量更新只删除不再存在的旧节点、添加新发现的节点，避免全量替换期间阻塞读者。
+// 同时同步一致性哈希环，保证 RouteUser 路由的准确性。
 func (cm *ClusterManager) discoveryLoop() {
 	ticker := time.NewTicker(cm.heartbeat)
 	defer ticker.Stop()
@@ -147,9 +159,11 @@ func (cm *ClusterManager) discoveryLoop() {
 
 			// 构建新节点集合（排除自身）
 			newNodes := make(map[string]ClusterNode, len(nodes))
+			var nodeList []ClusterNode
 			for _, node := range nodes {
 				if node.Tag != cm.self.Tag {
 					newNodes[node.Tag] = node
+					nodeList = append(nodeList, node)
 				}
 			}
 
@@ -170,6 +184,9 @@ func (cm *ClusterManager) discoveryLoop() {
 				cm.nodes.Store(tag, node)
 			}
 			cm.nodesMu.Unlock()
+
+			// 同步一致性哈希环
+			cm.ring.Set(nodeList)
 		case <-cm.ctx.Done():
 			return
 		}

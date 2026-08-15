@@ -39,6 +39,9 @@ type Pipeline struct {
 
 	chainMu sync.RWMutex
 	chains  map[string]Handler // key → 缓存的中间件链
+
+	// 清理函数（Shutdown 时调用）
+	cleanupFns []func()
 }
 
 // RESTRoutes 返回所有已注册的 RESTful 路由路径（线程安全快照）。
@@ -284,6 +287,7 @@ func (p *Pipeline) executeCmd(ctx *Context) error {
 }
 
 // buildChain 构建完整的中间件链：全局 + 前缀匹配 + 路由级。
+// 执行顺序由外到内：全局中间件 → 前缀匹配中间件 → 路由级中间件 → Handler。
 // 结果按 key 缓存，中间件变更时通过 invalidateCache 失效。
 func (p *Pipeline) buildChain(key string, h Handler) Handler {
 	p.chainMu.RLock()
@@ -329,8 +333,24 @@ func (p *Pipeline) invalidateCache() {
 	p.chainMu.Unlock()
 }
 
+// addCleanup 注册一个清理函数，在 Pipeline.Stop() 时调用。
+// 用于中间件内部有后台 goroutine 的场景（如 rateLimitPool）。
+func (p *Pipeline) addCleanup(fn func()) {
+	p.cleanupFns = append(p.cleanupFns, fn)
+}
+
+// Stop 执行所有已注册的清理函数。
+// 幂等：多次调用安全。
+func (p *Pipeline) Stop() {
+	for _, fn := range p.cleanupFns {
+		fn()
+	}
+	p.cleanupFns = nil
+}
+
 // matchPrefix 检查 key 是否匹配 prefix。
 // prefix 中的 "*" 匹配任意字符序列（包括空）。
+// 示例："file.*" 匹配 "file.upload"、"file.download"；"*" 匹配所有。
 func matchPrefix(key, prefix string) bool {
 	if prefix == "*" || prefix == key {
 		return true

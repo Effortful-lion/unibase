@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"database/sql"
 	"time"
 
@@ -64,30 +63,4 @@ func (m *MySQL) Ping() error {
 // Close 关闭 MySQL 连接池。
 func (m *MySQL) Close() error {
 	return m.db.Close()
-}
-
-// ==================== 快捷操作 ====================
-
-// Exec 执行非查询 SQL（INSERT / UPDATE / DELETE）。
-// result 可调用 LastInsertId() / RowsAffected() 获取结果。
-func (m *MySQL) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return m.db.ExecContext(ctx, query, args...)
-}
-
-// NamedExec 使用命名参数执行 SQL。
-// args 支持 map[string]any 或 struct。
-func (m *MySQL) NamedExec(ctx context.Context, query string, args any) (sql.Result, error) {
-	return m.db.NamedExecContext(ctx, query, args)
-}
-
-// Query 执行查询并将结果扫描到 dest 切片中。
-// dest 必须为指针切片，如 &[]User{}。
-func (m *MySQL) Query(ctx context.Context, dest any, query string, args ...any) error {
-	return m.db.SelectContext(ctx, dest, query, args...)
-}
-
-// Get 执行查询并扫描单行结果到 dest。
-// dest 必须为指针，如 &user。
-func (m *MySQL) Get(ctx context.Context, dest any, query string, args ...any) error {
-	return m.db.GetContext(ctx, dest, query, args...)
 }
